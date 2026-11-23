@@ -90,6 +90,22 @@ $('exportBtn').onclick=async()=>{
  try{video.pause();video.currentTime=from;await new Promise((resolve,reject)=>{const done=()=>{video.removeEventListener('seeked',done);resolve()};video.addEventListener('seeked',done,{once:true});setTimeout(()=>reject(new Error('Video seek timed out')),5000)});video.volume=Number($('volume').value);video.playbackRate=Number($('speed').value);recorder.start(250);await video.play();const drawExport=()=>{if(!recording)return;c.save();c.clearRect(0,0,out.width,out.height);c.translate(out.width/2,out.height/2);c.rotate(rotation*Math.PI/180);const rw=rotation%180?out.height:out.width,rh=rotation%180?out.width:out.height;c.scale(flipX,flipY);c.filter=$('filter').value+' brightness('+$('brightness').value+'%) contrast('+$('contrast').value+'%) saturate('+$('saturation').value+'%)';c.drawImage(video,-rw/2,-rh/2,rw,rh);c.filter='none';const txt=$('textOverlay').value.trim();if(txt){const fs=Number($('fontSize').value)*ratio;c.font='700 '+fs+'px system-ui';c.textAlign='center';c.textBaseline='bottom';c.lineWidth=Math.max(2,fs*.12);c.strokeStyle='rgba(0,0,0,.7)';c.fillStyle=$('textColor').value;c.strokeText(txt,0,rh*.39);c.fillText(txt,0,rh*.39)}c.restore();if(recording&&video.currentTime<to)requestAnimationFrame(drawExport);else if(recording){video.pause();if(recorder.state!=='inactive')recorder.stop()}};drawExport()}catch(e){recording=false;if(recorder.state!=='inactive')recorder.stop();setReady(true);status('Export could not start: '+e.message)}finally{$('exportBtn').textContent='Export video ↗'}
 };
 
+
+// Lightweight edit history for non-destructive settings.
+const historyIds=['filter','textOverlay','textColor','fontSize','volume','quality','brightness','contrast','saturation','speed','startRange','endRange'];
+let undoStack=[],redoStack=[],lastState='';
+function historySnapshot(){return JSON.stringify({values:historyIds.map(id=>$(id).value),rotation,flipX,flipY})}
+function syncHistoryButtons(){$('undoBtn').disabled=!undoStack.length;$('redoBtn').disabled=!redoStack.length}
+function restoreHistory(snapshot){const d=JSON.parse(snapshot);historyIds.forEach((id,i)=>$(id).value=d.values[i]);rotation=d.rotation;flipX=d.flipX;flipY=d.flipY;video.volume=Number($('volume').value);video.playbackRate=Number($('speed').value);['brightness','contrast','saturation'].forEach(id=>$(id+'Value').textContent=$(id).value+'%');$('speedValue').textContent=Number($('speed').value).toFixed(2)+'×';$('startVal').textContent=fmt(start());$('endVal').textContent=fmt(end());draw()}
+function pushHistory(){const next=historySnapshot();if(next===lastState)return;if(lastState)undoStack.push(lastState);if(undoStack.length>60)undoStack.shift();redoStack=[];lastState=next;syncHistoryButtons()}
+function undo(){if(!undoStack.length)return;redoStack.push(historySnapshot());lastState=undoStack.pop();restoreHistory(lastState);syncHistoryButtons()}
+function redo(){if(!redoStack.length)return;undoStack.push(historySnapshot());lastState=redoStack.pop();restoreHistory(lastState);syncHistoryButtons()}
+$('undoBtn').onclick=undo;$('redoBtn').onclick=redo;
+historyIds.forEach(id=>$(id).addEventListener('change',pushHistory));
+['rotateLeft','rotateRight','flipH','flipV'].forEach(id=>$(id).addEventListener('click',pushHistory));
+document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();undo()}else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();redo()}});
+lastState=historySnapshot();syncHistoryButtons();
+
 // Project files store edit settings; source media remains on your device.
 const projectFields=['filter','textOverlay','textColor','fontSize','volume','quality','brightness','contrast','saturation','speed','startRange','endRange'];
 function projectData(){const settings={};projectFields.forEach(id=>settings[id]=$(id).value);return {app:'Cutroom',version:2,settings,rotation,flipX,flipY,sourceName:video.dataset.filename||''}}
