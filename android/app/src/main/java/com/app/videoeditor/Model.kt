@@ -77,6 +77,33 @@ data class Clip(
     val outputMs: Long get() = (trimmedMs / speed).toLong()
 }
 
+// ==========================================
+// NAYA ADD KIYA GAYA: TIMELINE & PROJECT MODEL
+// ==========================================
+
+/**
+ * Ek Timeline jisme multiple clips ek ke baad ek lag sakte hain.
+ */
+data class VideoTimeline(
+    val clips: List<Clip> = emptyList()
+) {
+    // Poori video ki total length (saare clips mila kar)
+    val totalDurationMs: Long get() = clips.sumOf { it.outputMs }
+}
+
+/**
+ * Yeh aapka main project state hoga jo ViewModel hold karega.
+ * Pehle yahan sirf ek clip hota tha, ab ek poori Timeline hai.
+ */
+data class VideoProject(
+    val projectId: String = System.currentTimeMillis().toString(),
+    val title: String = "My Project",
+    val timeline: VideoTimeline = VideoTimeline(),
+    val aspect: Aspect = Aspect.Original,
+    val musicUri: Uri? = null,
+    val musicVolume: Float = 0.5f
+)
+
 sealed class ExportState {
     object Idle : ExportState()
     data class Running(val progress: Float) : ExportState()
@@ -84,6 +111,11 @@ sealed class ExportState {
     data class Failed(val message: String) : ExportState()
 }
 
+// ==========================================
+// JSON SAVE / LOAD UPGRADES
+// ==========================================
+
+// Purana Clip.toJson() waise hi hai (Clip ke andar ke features ke liye)
 fun Clip.toJson(): JSONObject = JSONObject().apply {
     put("id", id); put("uri", uri.toString()); put("dur", durationMs); put("w", width); put("h", height)
     put("start", startMs); put("end", endMs); put("img", isImage)
@@ -136,4 +168,16 @@ fun clipFromJson(o: JSONObject): Clip {
         anim = runCatching { Anim.valueOf(o.getString("anim")) }.getOrDefault(Anim.None),
         fadeInMs = o.optLong("fin", 0L), fadeOutMs = o.optLong("fout", 0L), layers = layers
     )
+}
+
+// Project ko JSON mein save karne ke liye naya function
+fun VideoProject.toJson(): JSONObject = JSONObject().apply {
+    put("id", projectId)
+    put("title", title)
+    put("aspect", aspect.name)
+    put("music", musicUri?.toString() ?: "")
+    put("musicVol", musicVolume.toDouble())
+    put("clips", JSONArray().apply {
+        timeline.clips.forEach { put(it.toJson()) }
+    })
 }
