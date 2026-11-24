@@ -69,7 +69,7 @@ fun EditorScreen(vm: EditorViewModel) {
     }
 
     val pickVideos = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { vm.addUris(it) }
-    val pickAudio = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u -> if (u != null) vm.setMusic(u) }
+    val pickAudio = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u -> if (u != null) vm.updateMusic(u) }
     fun addVideos() = pickVideos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
 
     Column(
@@ -226,7 +226,7 @@ private fun ToolPanel(vm: EditorViewModel, tool: Tool, c: Clip?, pickMusic: () -
     if (tool == Tool.Music) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Button(onClick = pickMusic) { Text(if (vm.music == null) "Add music" else "Change music") }
-            if (vm.music != null) OutlinedButton(onClick = { vm.setMusic(null) }) { Text("Remove") }
+            if (vm.music != null) OutlinedButton(onClick = { vm.updateMusic(null) }) { Text("Remove") }
         }
         if (vm.music != null) {
             LabeledSlider("Music volume", vm.musicVolume, 0f..2f, "${(vm.musicVolume * 100).toInt()}%") { vm.musicVolume = it }

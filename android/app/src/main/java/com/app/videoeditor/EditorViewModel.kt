@@ -135,7 +135,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         clips = clips.toMutableList().apply { removeAt(i); add(j, c) }
     }
 
-    fun setMusic(uri: Uri?) { music = uri }
+    fun updateMusic(uri: Uri?) { music = uri }
 
     // ---------- preview ----------
     fun applyPreview(c: Clip) {
