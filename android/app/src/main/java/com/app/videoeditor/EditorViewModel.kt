@@ -4,24 +4,21 @@ package com.app.videoeditor
 
 import android.app.Application
 import android.content.ContentValues
-import android.graphics.Bitmap
-import android.media.MediaMetadataRetriever
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import android.net.Uri
-import android.os.SystemClock
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.snapshotFlow
-import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.flow.debounce
-import org.json.JSONArray
-import org.json.JSONObject
 import android.os.Environment
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.widget.Toast
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
@@ -35,9 +32,13 @@ import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.ProgressHolder
 import androidx.media3.transformer.Transformer
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import kotlin.math.roundToInt
 
@@ -47,17 +48,21 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     var clips by mutableStateOf(listOf<Clip>()); private set
     var selectedId by mutableStateOf<Long?>(null)
+    var selectedLayerId by mutableStateOf<Long?>(null)
     var aspect by mutableStateOf(Aspect.Original)
     var quality by mutableStateOf(720)
     var fill by mutableStateOf(false)
+    var safeZone by mutableStateOf(false)
     var music by mutableStateOf<Uri?>(null); private set
     var musicVolume by mutableStateOf(1f)
     var export by mutableStateOf<ExportState>(ExportState.Idle)
+    var previewBitmap by mutableStateOf<Bitmap?>(null); private set
     val thumbs = mutableStateMapOf<Long, Bitmap>()
 
     val player: ExoPlayer = ExoPlayer.Builder(ctx).build()
     private var nextId = 1L
     private var previewKey: Triple<Long, Long, Long>? = null
+    private var previewImageId = -1L
     private var transformer: Transformer? = null
 
     val selected: Clip? get() = clips.firstOrNull { it.id == selectedId }
@@ -83,7 +88,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun fixSelection() {
         if (clips.none { it.id == selectedId }) selectedId = clips.firstOrNull()?.id
-        if (clips.isEmpty()) { previewKey = null; player.clearMediaItems() }
+        if (clips.isEmpty()) { previewKey = null; previewImageId = -1L; previewBitmap = null; player.clearMediaItems() }
         undoCount = undoStack.size; redoCount = redoStack.size
         lastRecord = 0L
     }
@@ -128,11 +133,16 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                     val out = mutableListOf<Pair<Clip, Bitmap?>>()
                     for (i in 0 until arr.length()) {
                         val c = clipFromJson(arr.getJSONObject(i))
-                        val r = MediaMetadataRetriever()
-                        try {
-                            r.setDataSource(ctx, c.uri)
-                            out += c to r.getScaledFrameAtTime(c.startMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 240, 240)
-                        } catch (e: Exception) { /* file no longer available: drop clip */ } finally { r.release() }
+                        if (c.isImage) {
+                            val b = decodeBitmap(c.uri, 320)
+                            if (b != null) out += c to b
+                        } else {
+                            val r = MediaMetadataRetriever()
+                            try {
+                                r.setDataSource(ctx, c.uri)
+                                out += c to r.getScaledFrameAtTime(c.startMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 240, 240)
+                            } catch (e: Exception) { /* file gone: drop clip */ } finally { r.release() }
+                        }
                     }
                     Triple(o, out, o.optString("music", ""))
                 }.getOrNull()
@@ -140,7 +150,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             val (o, list, musicStr) = restored
             list.forEach { (c, b) -> if (b != null) thumbs[c.id] = b }
             clips = list.map { it.first }
-            nextId = (clips.maxOfOrNull { it.id } ?: 0L) + 1
+            nextId = (clips.maxOfOrNull { c -> maxOf(c.id, c.layers.maxOfOrNull { it.id } ?: 0L) } ?: 0L) + 1
             selectedId = clips.firstOrNull()?.id
             if (musicStr.isNotBlank() && musicStr != "null") music = Uri.parse(musicStr)
             musicVolume = o.optDouble("musicVolume", 1.0).toFloat()
@@ -151,11 +161,21 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun newProject() {
         record(true)
-        clips = emptyList(); selectedId = null; music = null
-        previewKey = null; player.clearMediaItems()
+        clips = emptyList(); selectedId = null; selectedLayerId = null; music = null
+        previewKey = null; previewImageId = -1L; previewBitmap = null; player.clearMediaItems()
     }
 
     // ---------- importing ----------
+    private fun decodeBitmap(uri: Uri, maxDim: Int): Bitmap? = try {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+        val sample = maxOf(1, maxOf(bounds.outWidth, bounds.outHeight) / maxDim)
+        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
+        ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
+    } catch (e: Exception) {
+        null
+    }
+
     fun addUris(uris: List<Uri>) {
         viewModelScope.launch {
             for (u in uris) {
@@ -174,6 +194,16 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun load(uri: Uri): Pair<Clip, Bitmap?>? {
+        val type = ctx.contentResolver.getType(uri) ?: ""
+        if (type.startsWith("image/")) {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            try {
+                ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+            } catch (e: Exception) { return null }
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+            val thumb = decodeBitmap(uri, 320)
+            return Clip(nextId++, uri, 60_000L, bounds.outWidth, bounds.outHeight, 0L, 3_000L, isImage = true) to thumb
+        }
         val r = MediaMetadataRetriever()
         return try {
             r.setDataSource(ctx, uri)
@@ -199,11 +229,9 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun split() {
         val c = selected ?: return
+        if (c.isImage) { toast("Photos can't be split. Drag the handles to set the duration."); return }
         val pos = player.currentPosition
-        if (pos < 300 || pos > c.trimmedMs - 300) {
-            Toast.makeText(ctx, "Move the playhead inside the clip first", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (pos < 300 || pos > c.trimmedMs - 300) { toast("Move the playhead inside the clip first"); return }
         record(true)
         val at = c.startMs + pos
         val second = c.copy(id = nextId++, startMs = at)
@@ -212,6 +240,14 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val i = clips.indexOfFirst { it.id == c.id }
         clips = clips.toMutableList().apply { set(i, first); add(i + 1, second) }
         selectedId = second.id
+    }
+
+    fun trimToPlayhead(left: Boolean) {
+        val c = selected ?: return
+        if (c.isImage) { toast("Drag the clip handles to change a photo's duration"); return }
+        val pos = player.currentPosition
+        if (pos < 300 || pos > c.trimmedMs - 300) { toast("Move the playhead inside the clip first"); return }
+        update(c.id) { if (left) it.copy(startMs = it.startMs + pos) else it.copy(endMs = it.startMs + pos) }
     }
 
     fun duplicate() {
@@ -230,7 +266,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val i = clips.indexOfFirst { it.id == c.id }
         clips = clips.filter { it.id != c.id }
         selectedId = clips.getOrNull(minOf(i, clips.size - 1))?.id
-        if (clips.isEmpty()) { previewKey = null; player.clearMediaItems() }
+        selectedLayerId = null
+        if (clips.isEmpty()) { previewKey = null; previewImageId = -1L; previewBitmap = null; player.clearMediaItems() }
     }
 
     fun move(dir: Int) {
@@ -244,8 +281,40 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun updateMusic(uri: Uri?) { music = uri }
 
+    // ---------- text & sticker layers ----------
+    fun addLayer(text: String, scale: Float, y: Float) {
+        val c = selected ?: return
+        val layer = TextLayer(nextId++, text = text, scale = scale, y = y)
+        update(c.id) { it.copy(layers = it.layers + layer) }
+        selectedLayerId = layer.id
+    }
+
+    fun updateLayer(layerId: Long, f: (TextLayer) -> TextLayer) {
+        val c = selected ?: return
+        update(c.id) { cl -> cl.copy(layers = cl.layers.map { if (it.id == layerId) f(it) else it }) }
+    }
+
+    fun deleteLayer(layerId: Long) {
+        val c = selected ?: return
+        record(true)
+        clips = clips.map { if (it.id == c.id) it.copy(layers = it.layers.filter { l -> l.id != layerId }) else it }
+        selectedLayerId = null
+    }
+
+    private fun toast(msg: String) = Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
+
     // ---------- preview ----------
     fun applyPreview(c: Clip) {
+        if (c.isImage) {
+            player.pause()
+            if (previewKey != null) { player.clearMediaItems(); previewKey = null }
+            if (previewImageId != c.id) {
+                previewImageId = c.id
+                viewModelScope.launch { previewBitmap = withContext(Dispatchers.IO) { decodeBitmap(c.uri, 1600) } }
+            }
+            return
+        }
+        previewBitmap = null; previewImageId = -1L
         val key = Triple(c.id, c.startMs, c.endMs)
         if (key != previewKey) {
             previewKey = key
@@ -263,6 +332,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun togglePlay() {
+        if (selected?.isImage == true) return
         if (player.isPlaying) player.pause() else {
             if (player.playbackState == androidx.media3.common.Player.STATE_ENDED) player.seekTo(0)
             player.play()

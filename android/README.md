@@ -1,14 +1,13 @@
 # Video Editor (Android)
 
-Kotlin + Jetpack Compose + Media3 (ExoPlayer preview, Transformer export).
+Kotlin + Jetpack Compose + Media3 (ExoPlayer preview, Transformer export). Offline, no ads, no account.
 
-## Build the APK (no Android Studio needed)
-1. Push this folder to your GitHub repo (main branch).
-2. GitHub -> Actions -> "Build APK" -> run -> download artifact `VideoEditor-debug-apk`.
-3. Unzip, install `app-debug.apk` on your phone.
+## Editor layout (CapCut-style)
+Preview on top, multi-track timeline in the middle (clips with trim handles, text/sticker track, music track),
+context-sensitive toolbar at the bottom. Undo/redo above the timeline. Project autosaves.
 
-## Tools in this version
-Multi-clip timeline, trim, split, speed 0.25x-4x, mute/volume, rotate/flip/zoom,
-brightness/contrast/saturation/warmth, 6 filters, text overlay, aspect ratio
-(16:9, 9:16, 1:1, 4:5, 21:9), 480/720/1080p, background music (looping),
-reorder/duplicate/delete, MP4 export to Movies/VideoEditor + share.
+## Tools
+Videos + photos, trim (drag handles), split, trim-to-playhead, speed 0.25x-4x, volume/mute, music, crop,
+rotate/flip/zoom, brightness/contrast/saturation/warmth/hue, 12 filters, motion animations (zoom/pan/pulse),
+fade in/out, multiple text layers (fonts, colours, box), 40 stickers, aspect ratios + safe-zone guide,
+480/720/1080p MP4 export to Movies/VideoEditor.

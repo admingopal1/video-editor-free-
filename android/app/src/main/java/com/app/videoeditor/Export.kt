@@ -2,11 +2,16 @@
 
 package com.app.videoeditor
 
+import android.graphics.Matrix
+import android.graphics.Typeface
+import android.net.Uri
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.AbsoluteSizeSpan
+import android.text.style.BackgroundColorSpan
 import android.text.style.ForegroundColorSpan
-import android.net.Uri
+import android.text.style.StyleSpan
+import android.text.style.TypefaceSpan
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.audio.AudioProcessor
@@ -15,7 +20,9 @@ import androidx.media3.common.audio.ChannelMixingMatrix
 import androidx.media3.common.audio.SonicAudioProcessor
 import androidx.media3.effect.Brightness
 import androidx.media3.effect.Contrast
+import androidx.media3.effect.Crop
 import androidx.media3.effect.HslAdjustment
+import androidx.media3.effect.MatrixTransformation
 import androidx.media3.effect.OverlayEffect
 import androidx.media3.effect.OverlaySettings
 import androidx.media3.effect.Presentation
@@ -25,11 +32,14 @@ import androidx.media3.effect.RgbMatrix
 import androidx.media3.effect.ScaleAndRotateTransformation
 import androidx.media3.effect.SpeedChangeEffect
 import androidx.media3.effect.TextOverlay
+import androidx.media3.effect.TextureOverlay
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
 import com.google.common.collect.ImmutableList
+import kotlin.math.PI
+import kotlin.math.sin
 
 private val sepiaMatrix = object : RgbMatrix {
     override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray = floatArrayOf(
@@ -40,11 +50,88 @@ private val sepiaMatrix = object : RgbMatrix {
     )
 }
 
-/** Visual effects for one clip. [presentation] is only used for export (final canvas size). */
+/** Remembers the first timestamp it sees so effects work whether timestamps are per-clip or absolute. */
+private class TimeBase {
+    private var base = -1L
+    fun rel(t: Long): Long {
+        if (base < 0) base = t
+        return (t - base).coerceAtLeast(0L)
+    }
+}
+
+private fun animEffect(c: Clip): Effect? {
+    if (c.anim == Anim.None) return null
+    val total = (c.outputMs * 1000L).coerceAtLeast(1L)
+    val tb = TimeBase()
+    return object : MatrixTransformation {
+        override fun getMatrix(presentationTimeUs: Long): Matrix {
+            val r = tb.rel(presentationTimeUs)
+            val f = (r.toFloat() / total).coerceIn(0f, 1f)
+            val m = Matrix()
+            when (c.anim) {
+                Anim.ZoomIn -> { val s = 1f + 0.25f * f; m.postScale(s, s) }
+                Anim.ZoomOut -> { val s = 1.25f - 0.25f * f; m.postScale(s, s) }
+                Anim.PanLeft -> { m.postScale(1.2f, 1.2f); m.postTranslate(0.18f * (1f - 2f * f), 0f) }
+                Anim.PanRight -> { m.postScale(1.2f, 1.2f); m.postTranslate(-0.18f * (1f - 2f * f), 0f) }
+                Anim.Pulse -> {
+                    val sec = r / 1_000_000f
+                    val s = 1f + 0.05f * sin(2.0 * PI * sec).toFloat()
+                    m.postScale(s, s)
+                }
+                Anim.None -> {}
+            }
+            return m
+        }
+    }
+}
+
+private fun fadeEffect(c: Clip): Effect? {
+    if (c.fadeInMs <= 0L && c.fadeOutMs <= 0L) return null
+    val total = c.outputMs * 1000L
+    val inUs = c.fadeInMs * 1000L
+    val outUs = c.fadeOutMs * 1000L
+    val tb = TimeBase()
+    return object : RgbMatrix {
+        override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray {
+            val t = tb.rel(presentationTimeUs)
+            var f = 1f
+            if (inUs > 0 && t < inUs) f = t.toFloat() / inUs
+            if (outUs > 0 && t > total - outUs) f = minOf(f, (total - t).toFloat() / outUs)
+            f = f.coerceIn(0f, 1f)
+            return floatArrayOf(
+                f, 0f, 0f, 0f,
+                0f, f, 0f, 0f,
+                0f, 0f, f, 0f,
+                0f, 0f, 0f, 1f
+            )
+        }
+    }
+}
+
+private fun textOverlays(c: Clip): List<TextureOverlay> = c.layers.filter { it.text.isNotBlank() }.map { t ->
+    val s = SpannableString(t.text)
+    val n = s.length
+    val flag = Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+    s.setSpan(ForegroundColorSpan(t.color), 0, n, flag)
+    s.setSpan(AbsoluteSizeSpan(72), 0, n, flag)
+    s.setSpan(TypefaceSpan(FONT_NAMES[t.font.coerceIn(0, FONT_NAMES.lastIndex)]), 0, n, flag)
+    if (t.bold) s.setSpan(StyleSpan(Typeface.BOLD), 0, n, flag)
+    if (t.background) s.setSpan(BackgroundColorSpan(0xB3000000.toInt()), 0, n, flag)
+    val settings = OverlaySettings.Builder()
+        .setBackgroundFrameAnchor(t.x, t.y)
+        .setScale(t.scale, t.scale)
+        .build()
+    TextOverlay.createStaticTextOverlay(s, settings)
+}
+
+/** Visual effects for one clip. Time-based effects (animation, fade) and speed are export-only. */
 fun buildVideoEffects(c: Clip, presentation: Presentation?, forExport: Boolean): List<Effect> {
     val l = mutableListOf<Effect>()
-    if (forExport && c.speed != 1f) l += SpeedChangeEffect(c.speed)
+    if (forExport && c.speed != 1f && !c.isImage) l += SpeedChangeEffect(c.speed)
 
+    if (c.cropL > 0f || c.cropR > 0f || c.cropT > 0f || c.cropB > 0f) {
+        l += Crop(-1f + 2f * c.cropL, 1f - 2f * c.cropR, -1f + 2f * c.cropB, 1f - 2f * c.cropT)
+    }
     if (c.rotation != 0 || c.flipH || c.flipV || c.zoom != 1f) {
         val sx = if (c.flipH) -c.zoom else c.zoom
         val sy = if (c.flipV) -c.zoom else c.zoom
@@ -53,9 +140,13 @@ fun buildVideoEffects(c: Clip, presentation: Presentation?, forExport: Boolean):
             .setScale(sx, sy)
             .build()
     }
+    if (forExport) animEffect(c)?.let { l += it }
+
     if (c.brightness != 0f) l += Brightness(c.brightness)
     if (c.contrast != 0f) l += Contrast(c.contrast)
-    if (c.saturation != 0f) l += HslAdjustment.Builder().adjustSaturation(c.saturation * 100f).build()
+    if (c.saturation != 0f || c.hue != 0f) {
+        l += HslAdjustment.Builder().adjustHue(c.hue * 180f).adjustSaturation(c.saturation * 100f).build()
+    }
     if (c.warmth != 0f) {
         l += RgbAdjustment.Builder()
             .setRedScale(1f + 0.3f * c.warmth)
@@ -65,33 +156,45 @@ fun buildVideoEffects(c: Clip, presentation: Presentation?, forExport: Boolean):
     when (c.filter) {
         Filter.None -> {}
         Filter.Gray -> l += RgbFilter.createGrayscaleFilter()
+        Filter.Noir -> { l += RgbFilter.createGrayscaleFilter(); l += Contrast(0.3f) }
         Filter.Invert -> l += RgbFilter.createInvertedFilter()
         Filter.Sepia -> l += sepiaMatrix
+        Filter.Vintage -> {
+            l += HslAdjustment.Builder().adjustSaturation(-30f).build()
+            l += RgbAdjustment.Builder().setRedScale(1.1f).setBlueScale(0.85f).build()
+        }
+        Filter.Cinema -> {
+            l += RgbAdjustment.Builder().setRedScale(1.08f).setGreenScale(0.97f).setBlueScale(1.05f).build()
+            l += Contrast(0.2f)
+            l += HslAdjustment.Builder().adjustSaturation(10f).build()
+        }
         Filter.Warm -> l += RgbAdjustment.Builder().setRedScale(1.15f).setBlueScale(0.88f).build()
         Filter.Cool -> l += RgbAdjustment.Builder().setRedScale(0.88f).setBlueScale(1.15f).build()
         Filter.Vivid -> {
             l += HslAdjustment.Builder().adjustSaturation(40f).build()
             l += Contrast(0.15f)
         }
+        Filter.Fade -> {
+            l += Contrast(-0.25f)
+            l += Brightness(0.08f)
+            l += HslAdjustment.Builder().adjustSaturation(-20f).build()
+        }
+        Filter.Pop -> {
+            l += HslAdjustment.Builder().adjustSaturation(60f).build()
+            l += Contrast(0.2f)
+        }
     }
+    if (forExport) fadeEffect(c)?.let { l += it }
     if (presentation != null) l += presentation
 
-    if (c.text.isNotBlank()) {
-        val s = SpannableString(c.text)
-        s.setSpan(ForegroundColorSpan(c.textColor), 0, s.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        s.setSpan(AbsoluteSizeSpan(72), 0, s.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        val settings = OverlaySettings.Builder()
-            .setBackgroundFrameAnchor(0f, c.textY)
-            .setScale(c.textScale, c.textScale)
-            .build()
-        l += OverlayEffect(ImmutableList.of(TextOverlay.createStaticTextOverlay(s, settings)))
-    }
+    val overlays = textOverlays(c)
+    if (overlays.isNotEmpty()) l += OverlayEffect(ImmutableList.copyOf<TextureOverlay>(overlays))
     return l
 }
 
 fun buildAudioProcessors(c: Clip): List<AudioProcessor> {
     val l = mutableListOf<AudioProcessor>()
-    if (c.speed != 1f) l += SonicAudioProcessor().apply { setSpeed(c.speed) }
+    if (c.speed != 1f && !c.isImage) l += SonicAudioProcessor().apply { setSpeed(c.speed) }
     if (c.volume != 1f && !c.muted) l += volumeProcessor(c.volume)
     return l
 }
@@ -108,18 +211,23 @@ fun buildComposition(
     musicVolume: Float
 ): Composition {
     val items = clips.map { c ->
-        val mi = MediaItem.Builder()
-            .setUri(c.uri)
-            .setClippingConfiguration(
-                MediaItem.ClippingConfiguration.Builder()
-                    .setStartPositionMs(c.startMs)
-                    .setEndPositionMs(c.endMs)
-                    .build()
-            ).build()
-        EditedMediaItem.Builder(mi)
-            .setRemoveAudio(c.muted)
-            .setEffects(Effects(buildAudioProcessors(c), buildVideoEffects(c, presentation, true)))
-            .build()
+        val builder = if (c.isImage) {
+            EditedMediaItem.Builder(MediaItem.fromUri(c.uri))
+                .setDurationUs(c.trimmedMs * 1000L)
+                .setFrameRate(30)
+                .setRemoveAudio(true)
+        } else {
+            val mi = MediaItem.Builder()
+                .setUri(c.uri)
+                .setClippingConfiguration(
+                    MediaItem.ClippingConfiguration.Builder()
+                        .setStartPositionMs(c.startMs)
+                        .setEndPositionMs(c.endMs)
+                        .build()
+                ).build()
+            EditedMediaItem.Builder(mi).setRemoveAudio(c.muted)
+        }
+        builder.setEffects(Effects(buildAudioProcessors(c), buildVideoEffects(c, presentation, true))).build()
     }
     val sequences = mutableListOf(EditedMediaItemSequence(items))
     if (music != null) {
