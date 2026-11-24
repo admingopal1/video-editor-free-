@@ -13,6 +13,10 @@ enum class Anim(val label: String) {
     None("None"), ZoomIn("Zoom in"), ZoomOut("Zoom out"), PanLeft("Pan ←"), PanRight("Pan →"), Pulse("Pulse")
 }
 
+enum class TextAnim(val label: String) {
+    None("None"), Fade("Fade in"), Pop("Pop"), SlideUp("Slide up")
+}
+
 enum class Aspect(val label: String, val ratio: Float?) {
     Original("Original", null), R9x16("9:16 Reels", 9f / 16f), R16x9("16:9 YouTube", 16f / 9f),
     R1x1("1:1", 1f), R4x5("4:5 Insta", 4f / 5f), R21x9("21:9", 21f / 9f)
@@ -30,8 +34,13 @@ data class TextLayer(
     val y: Float = 0.6f,
     val bold: Boolean = true,
     val background: Boolean = false,
-    val font: Int = 0
+    val font: Int = 0,
+    val startFrac: Float = 0f,
+    val endFrac: Float = 1f,
+    val anim: TextAnim = TextAnim.None
 )
+
+data class ProjectInfo(val id: String, val name: String, val updated: Long, val clipCount: Int, val durationMs: Long)
 
 data class Clip(
     val id: Long,
@@ -90,6 +99,7 @@ fun Clip.toJson(): JSONObject = JSONObject().apply {
                 put("id", l.id); put("text", l.text); put("color", l.color); put("scale", l.scale.toDouble())
                 put("x", l.x.toDouble()); put("y", l.y.toDouble()); put("bold", l.bold)
                 put("bg", l.background); put("font", l.font)
+                put("sf", l.startFrac.toDouble()); put("ef", l.endFrac.toDouble()); put("anim", l.anim.name)
             })
         }
     })
@@ -104,7 +114,9 @@ fun clipFromJson(o: JSONObject): Clip {
             id = l.getLong("id"), text = l.optString("text", ""), color = l.optInt("color", -1),
             scale = l.optDouble("scale", 1.0).toFloat(), x = l.optDouble("x", 0.0).toFloat(),
             y = l.optDouble("y", 0.6).toFloat(), bold = l.optBoolean("bold", true),
-            background = l.optBoolean("bg", false), font = l.optInt("font", 0)
+            background = l.optBoolean("bg", false), font = l.optInt("font", 0),
+            startFrac = l.optDouble("sf", 0.0).toFloat(), endFrac = l.optDouble("ef", 1.0).toFloat(),
+            anim = runCatching { TextAnim.valueOf(l.getString("anim")) }.getOrDefault(TextAnim.None)
         )
     }
     return Clip(

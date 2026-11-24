@@ -12,7 +12,9 @@ Edit videos fast with a clean, no-ads editor.
 - Brightness, contrast, saturation, warmth + 6 filters
 - Text on video with colour, size and position
 - 16:9, 9:16, 1:1, 4:5, 21:9 canvas; 480p / 720p / 1080p export
-- Undo / redo and automatic project saving
+- Named projects with thumbnails, undo / redo, automatic saving
+- Whole-project preview, drag to reorder clips, text with timing and animation
+- Export presets for Reels/Shorts, YouTube, Instagram and WhatsApp; 24/30 fps and bitrate options
 - Works offline, no account, no watermark
 
 **Category:** Video Players & Editors
@@ -22,3 +24,7 @@ Edit videos fast with a clean, no-ads editor.
 **Privacy policy URL:** host PRIVACY_POLICY.md (e.g. GitHub Pages) and paste the link.
 **Assets you must make:** 512x512 icon, 1024x500 feature graphic, 2-8 phone screenshots.
 **Upload:** the signed `.aab` from the GitHub Actions artifact "VideoEditor-release".
+
+**Play Console declarations**
+- Foreground service type: *Media processing* (and *Data sync* on Android 14 and below) — used only while exporting a video so it can finish when the app is in the background.
+- Notifications: shows export progress (permission is optional).

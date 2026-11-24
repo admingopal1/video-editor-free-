@@ -21,6 +21,7 @@ import androidx.media3.common.audio.SonicAudioProcessor
 import androidx.media3.effect.Brightness
 import androidx.media3.effect.Contrast
 import androidx.media3.effect.Crop
+import androidx.media3.effect.FrameDropEffect
 import androidx.media3.effect.HslAdjustment
 import androidx.media3.effect.MatrixTransformation
 import androidx.media3.effect.OverlayEffect
@@ -108,7 +109,7 @@ private fun fadeEffect(c: Clip): Effect? {
     }
 }
 
-private fun textOverlays(c: Clip): List<TextureOverlay> = c.layers.filter { it.text.isNotBlank() }.map { t ->
+private fun styledText(t: TextLayer): SpannableString {
     val s = SpannableString(t.text)
     val n = s.length
     val flag = Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
@@ -117,15 +118,61 @@ private fun textOverlays(c: Clip): List<TextureOverlay> = c.layers.filter { it.t
     s.setSpan(TypefaceSpan(FONT_NAMES[t.font.coerceIn(0, FONT_NAMES.lastIndex)]), 0, n, flag)
     if (t.bold) s.setSpan(StyleSpan(Typeface.BOLD), 0, n, flag)
     if (t.background) s.setSpan(BackgroundColorSpan(0xB3000000.toInt()), 0, n, flag)
-    val settings = OverlaySettings.Builder()
-        .setBackgroundFrameAnchor(t.x, t.y)
-        .setScale(t.scale, t.scale)
-        .build()
-    TextOverlay.createStaticTextOverlay(s, settings)
+    return s
 }
 
+/** Text that only shows between startFrac..endFrac of the clip and can animate in (export only). */
+private fun timedOverlay(c: Clip, t: TextLayer): TextureOverlay {
+    val text = styledText(t)
+    val total = (c.outputMs * 1000L).coerceAtLeast(1L)
+    val startUs = (t.startFrac * total).toLong()
+    val endUs = (t.endFrac * total).toLong()
+    val animUs = 400_000L
+    val tb = TimeBase()
+    return object : TextOverlay() {
+        override fun getText(presentationTimeUs: Long): SpannableString = text
+
+        override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings {
+            val r = tb.rel(presentationTimeUs)
+            val visible = r in startUs..endUs
+            var alpha = if (visible) 1f else 0f
+            var scale = t.scale
+            var y = t.y
+            if (visible) {
+                val a = ((r - startUs).toFloat() / animUs).coerceIn(0f, 1f)
+                when (t.anim) {
+                    TextAnim.Fade -> alpha = a
+                    TextAnim.Pop -> scale = t.scale * (0.5f + 0.5f * a)
+                    TextAnim.SlideUp -> y = t.y - 0.25f * (1f - a)
+                    TextAnim.None -> {}
+                }
+            }
+            return OverlaySettings.Builder()
+                .setBackgroundFrameAnchor(t.x, y)
+                .setScale(scale, scale)
+                .setAlphaScale(alpha)
+                .build()
+        }
+    }
+}
+
+private fun textOverlays(c: Clip, forExport: Boolean): List<TextureOverlay> =
+    c.layers.filter { it.text.isNotBlank() }.map { t ->
+        if (forExport && (t.startFrac > 0f || t.endFrac < 1f || t.anim != TextAnim.None)) {
+            timedOverlay(c, t)
+        } else {
+            TextOverlay.createStaticTextOverlay(
+                styledText(t),
+                OverlaySettings.Builder()
+                    .setBackgroundFrameAnchor(t.x, t.y)
+                    .setScale(t.scale, t.scale)
+                    .build()
+            )
+        }
+    }
+
 /** Visual effects for one clip. Time-based effects (animation, fade) and speed are export-only. */
-fun buildVideoEffects(c: Clip, presentation: Presentation?, forExport: Boolean): List<Effect> {
+fun buildVideoEffects(c: Clip, presentation: Presentation?, forExport: Boolean, fps: Int = 0): List<Effect> {
     val l = mutableListOf<Effect>()
     if (forExport && c.speed != 1f && !c.isImage) l += SpeedChangeEffect(c.speed)
 
@@ -185,9 +232,10 @@ fun buildVideoEffects(c: Clip, presentation: Presentation?, forExport: Boolean):
         }
     }
     if (forExport) fadeEffect(c)?.let { l += it }
+    if (forExport && fps > 0) l += FrameDropEffect.createDefaultFrameDropEffect(fps.toFloat())
     if (presentation != null) l += presentation
 
-    val overlays = textOverlays(c)
+    val overlays = textOverlays(c, forExport)
     if (overlays.isNotEmpty()) l += OverlayEffect(ImmutableList.copyOf<TextureOverlay>(overlays))
     return l
 }
@@ -208,7 +256,8 @@ fun buildComposition(
     clips: List<Clip>,
     presentation: Presentation,
     music: Uri?,
-    musicVolume: Float
+    musicVolume: Float,
+    fps: Int = 0
 ): Composition {
     val items = clips.map { c ->
         val builder = if (c.isImage) {
@@ -227,7 +276,7 @@ fun buildComposition(
                 ).build()
             EditedMediaItem.Builder(mi).setRemoveAudio(c.muted)
         }
-        builder.setEffects(Effects(buildAudioProcessors(c), buildVideoEffects(c, presentation, true))).build()
+        builder.setEffects(Effects(buildAudioProcessors(c), buildVideoEffects(c, presentation, true, fps))).build()
     }
     val sequences = mutableListOf(EditedMediaItemSequence(items))
     if (music != null) {
