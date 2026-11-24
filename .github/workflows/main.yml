@@ -2,11 +2,16 @@ name: Build Android APK
 on:
   push:
     branches: [main, master]
-    paths: ['android/**', '.github/workflows/android-build.yml']
+    paths: ['android/**', '.github/workflows/main.yml']
   workflow_dispatch:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      KS: ${{ secrets.KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
     defaults:
       run:
         working-directory: android
@@ -18,9 +23,25 @@ jobs:
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: 8.7
-      - run: gradle assembleDebug --no-daemon --stacktrace
+          gradle-version: 8.11.1
+      - name: Decode signing key
+        if: env.KS != ''
+        run: |
+          echo "$KS" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon --stacktrace
+      - name: Build signed release (APK + AAB)
+        if: env.KS != ''
+        run: gradle assembleRelease bundleRelease --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
         with:
           name: VideoEditor-debug-apk
           path: android/app/build/outputs/apk/debug/*.apk
+      - uses: actions/upload-artifact@v4
+        if: env.KS != ''
+        with:
+          name: VideoEditor-release
+          path: |
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/bundle/release/*.aab
