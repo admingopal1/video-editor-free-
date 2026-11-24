@@ -68,8 +68,16 @@ fun EditorScreen(vm: EditorViewModel) {
         if (clip != null) { delay(120); vm.applyPreview(clip) }
     }
 
-    val pickVideos = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { vm.addUris(it) }
-    val pickAudio = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u -> if (u != null) vm.updateMusic(u) }
+    val pickVideos = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris ->
+        uris.forEach { u -> runCatching { ctx.contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION) } }
+        vm.addUris(uris)
+    }
+    val pickAudio = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
+        if (u != null) {
+            runCatching { ctx.contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            vm.updateMusic(u)
+        }
+    }
     fun addVideos() = pickVideos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
 
     Column(
@@ -81,6 +89,8 @@ fun EditorScreen(vm: EditorViewModel) {
                 Text("Video Editor", style = MaterialTheme.typography.titleMedium)
                 if (vm.clips.isNotEmpty()) Text("${vm.clips.size} clips · ${fmt(vm.totalMs)}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
             }
+            TextButton(onClick = { vm.undo() }, enabled = vm.undoCount > 0) { Text("↶") }
+            TextButton(onClick = { vm.redo() }, enabled = vm.redoCount > 0) { Text("↷") }
             Button(onClick = { vm.startExport() }, enabled = vm.clips.isNotEmpty()) { Text("Export") }
         }
 
@@ -309,7 +319,10 @@ private fun ToolPanel(vm: EditorViewModel, tool: Tool, c: Clip?, pickMusic: () -
                 OutlinedButton(onClick = { vm.duplicate() }) { Text("⧉ Duplicate") }
             }
             Spacer(Modifier.height(8.dp))
-            Button(onClick = { vm.delete() }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB3261E))) { Text("🗑 Delete clip") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { vm.delete() }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB3261E))) { Text("🗑 Delete clip") }
+                OutlinedButton(onClick = { vm.newProject() }) { Text("New project") }
+            }
         }
         else -> {}
     }

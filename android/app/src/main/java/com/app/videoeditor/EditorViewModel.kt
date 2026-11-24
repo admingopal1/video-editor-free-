@@ -6,7 +6,15 @@ import android.app.Application
 import android.content.ContentValues
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
+import android.content.Context
 import android.net.Uri
+import android.os.SystemClock
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.debounce
+import org.json.JSONArray
+import org.json.JSONObject
 import android.os.Environment
 import android.provider.MediaStore
 import android.widget.Toast
@@ -33,6 +41,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import kotlin.math.roundToInt
 
+@OptIn(FlowPreview::class)
 class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private val ctx get() = getApplication<Application>()
 
@@ -54,6 +63,98 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     val selected: Clip? get() = clips.firstOrNull { it.id == selectedId }
     val totalMs: Long get() = clips.sumOf { it.outputMs }
 
+    // ---------- undo / redo ----------
+    private val undoStack = ArrayDeque<List<Clip>>()
+    private val redoStack = ArrayDeque<List<Clip>>()
+    var undoCount by mutableIntStateOf(0); private set
+    var redoCount by mutableIntStateOf(0); private set
+    private var lastRecord = 0L
+
+    private fun record(force: Boolean = false) {
+        val now = SystemClock.uptimeMillis()
+        if (force || now - lastRecord > 800) {
+            undoStack.addLast(clips)
+            if (undoStack.size > 60) undoStack.removeFirst()
+            redoStack.clear()
+        }
+        lastRecord = now
+        undoCount = undoStack.size; redoCount = redoStack.size
+    }
+
+    private fun fixSelection() {
+        if (clips.none { it.id == selectedId }) selectedId = clips.firstOrNull()?.id
+        if (clips.isEmpty()) { previewKey = null; player.clearMediaItems() }
+        undoCount = undoStack.size; redoCount = redoStack.size
+        lastRecord = 0L
+    }
+
+    fun undo() {
+        if (undoStack.isEmpty()) return
+        redoStack.addLast(clips); clips = undoStack.removeLast(); fixSelection()
+    }
+
+    fun redo() {
+        if (redoStack.isEmpty()) return
+        undoStack.addLast(clips); clips = redoStack.removeLast(); fixSelection()
+    }
+
+    // ---------- autosave / restore ----------
+    private val prefs = ctx.getSharedPreferences("project", Context.MODE_PRIVATE)
+
+    init {
+        restore()
+        viewModelScope.launch {
+            snapshotFlow { listOf<Any?>(clips, music, musicVolume, aspect, quality, fill) }
+                .debounce(600).collect { save() }
+        }
+    }
+
+    private fun save() {
+        val o = JSONObject()
+        o.put("clips", JSONArray().apply { clips.forEach { put(it.toJson()) } })
+        o.put("music", music?.toString())
+        o.put("musicVolume", musicVolume.toDouble())
+        o.put("aspect", aspect.name); o.put("quality", quality); o.put("fill", fill)
+        prefs.edit().putString("project", o.toString()).apply()
+    }
+
+    private fun restore() {
+        val raw = prefs.getString("project", null) ?: return
+        viewModelScope.launch {
+            val restored = withContext(Dispatchers.IO) {
+                runCatching {
+                    val o = JSONObject(raw)
+                    val arr = o.getJSONArray("clips")
+                    val out = mutableListOf<Pair<Clip, Bitmap?>>()
+                    for (i in 0 until arr.length()) {
+                        val c = clipFromJson(arr.getJSONObject(i))
+                        val r = MediaMetadataRetriever()
+                        try {
+                            r.setDataSource(ctx, c.uri)
+                            out += c to r.getScaledFrameAtTime(c.startMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 240, 240)
+                        } catch (e: Exception) { /* file no longer available: drop clip */ } finally { r.release() }
+                    }
+                    Triple(o, out, o.optString("music", ""))
+                }.getOrNull()
+            } ?: return@launch
+            val (o, list, musicStr) = restored
+            list.forEach { (c, b) -> if (b != null) thumbs[c.id] = b }
+            clips = list.map { it.first }
+            nextId = (clips.maxOfOrNull { it.id } ?: 0L) + 1
+            selectedId = clips.firstOrNull()?.id
+            if (musicStr.isNotBlank() && musicStr != "null") music = Uri.parse(musicStr)
+            musicVolume = o.optDouble("musicVolume", 1.0).toFloat()
+            aspect = runCatching { Aspect.valueOf(o.getString("aspect")) }.getOrDefault(Aspect.Original)
+            quality = o.optInt("quality", 720); fill = o.optBoolean("fill", false)
+        }
+    }
+
+    fun newProject() {
+        record(true)
+        clips = emptyList(); selectedId = null; music = null
+        previewKey = null; player.clearMediaItems()
+    }
+
     // ---------- importing ----------
     fun addUris(uris: List<Uri>) {
         viewModelScope.launch {
@@ -64,6 +165,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                     continue
                 }
                 val (clip, thumb) = loaded
+                record(true)
                 clips = clips + clip
                 if (thumb != null) thumbs[clip.id] = thumb
                 selectedId = clip.id
@@ -91,6 +193,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- clip operations ----------
     fun update(id: Long, f: (Clip) -> Clip) {
+        record()
         clips = clips.map { if (it.id == id) f(it) else it }
     }
 
@@ -101,6 +204,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             Toast.makeText(ctx, "Move the playhead inside the clip first", Toast.LENGTH_SHORT).show()
             return
         }
+        record(true)
         val at = c.startMs + pos
         val second = c.copy(id = nextId++, startMs = at)
         val first = c.copy(endMs = at)
@@ -112,6 +216,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun duplicate() {
         val c = selected ?: return
+        record(true)
         val copy = c.copy(id = nextId++)
         thumbs[c.id]?.let { thumbs[copy.id] = it }
         val i = clips.indexOfFirst { it.id == c.id }
@@ -121,6 +226,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun delete() {
         val c = selected ?: return
+        record(true)
         val i = clips.indexOfFirst { it.id == c.id }
         clips = clips.filter { it.id != c.id }
         selectedId = clips.getOrNull(minOf(i, clips.size - 1))?.id
@@ -132,6 +238,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val i = clips.indexOfFirst { it.id == c.id }
         val j = i + dir
         if (j !in clips.indices) return
+        record(true)
         clips = clips.toMutableList().apply { removeAt(i); add(j, c) }
     }
 

@@ -1,6 +1,7 @@
 package com.app.videoeditor
 
 import android.net.Uri
+import org.json.JSONObject
 
 enum class Filter(val label: String) {
     None("None"), Gray("B&W"), Sepia("Sepia"), Invert("Invert"), Warm("Warm"), Cool("Cool"), Vivid("Vivid")
@@ -46,3 +47,25 @@ sealed class ExportState {
     data class Done(val uri: Uri) : ExportState()
     data class Failed(val message: String) : ExportState()
 }
+
+fun Clip.toJson(): JSONObject = JSONObject().apply {
+    put("id", id); put("uri", uri.toString()); put("dur", durationMs); put("w", width); put("h", height)
+    put("start", startMs); put("end", endMs); put("speed", speed.toDouble()); put("vol", volume.toDouble())
+    put("muted", muted); put("rot", rotation); put("fh", flipH); put("fv", flipV); put("zoom", zoom.toDouble())
+    put("br", brightness.toDouble()); put("co", contrast.toDouble()); put("sa", saturation.toDouble())
+    put("wa", warmth.toDouble()); put("filter", filter.name)
+    put("text", text); put("tc", textColor); put("ts", textScale.toDouble()); put("ty", textY.toDouble())
+}
+
+fun clipFromJson(o: JSONObject): Clip = Clip(
+    id = o.getLong("id"), uri = Uri.parse(o.getString("uri")), durationMs = o.getLong("dur"),
+    width = o.getInt("w"), height = o.getInt("h"), startMs = o.getLong("start"), endMs = o.getLong("end"),
+    speed = o.getDouble("speed").toFloat(), volume = o.getDouble("vol").toFloat(), muted = o.getBoolean("muted"),
+    rotation = o.getInt("rot"), flipH = o.getBoolean("fh"), flipV = o.getBoolean("fv"),
+    zoom = o.getDouble("zoom").toFloat(), brightness = o.getDouble("br").toFloat(),
+    contrast = o.getDouble("co").toFloat(), saturation = o.getDouble("sa").toFloat(),
+    warmth = o.getDouble("wa").toFloat(),
+    filter = runCatching { Filter.valueOf(o.getString("filter")) }.getOrDefault(Filter.None),
+    text = o.getString("text"), textColor = o.getInt("tc"),
+    textScale = o.getDouble("ts").toFloat(), textY = o.getDouble("ty").toFloat()
+)
