@@ -44,6 +44,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -196,6 +197,7 @@ fun EditorScreen(vm: EditorViewModel) {
                                 colorFilter = imageFilter(clip)
                             )
                         }
+                        PhotoTextOverlays(clip, pos)
                     }
                 }
                 if (vm.clips.isEmpty()) {
@@ -744,6 +746,54 @@ private fun ToolPanel(
     }
 }
 
+/**
+ * Compose overlay for a selected still photo. Video clips use Media3's TextureOverlay
+ * from buildVideoEffects; still-image selection uses a Compose Image instead of PlayerView.
+ */
+@Composable
+private fun PhotoTextOverlays(c: Clip, positionMs: Long) {
+    val totalUs = (c.outputMs * 1000L).coerceAtLeast(1L)
+    val timeUs = (positionMs * 1000L).coerceIn(0L, totalUs)
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        c.layers.filter { it.text.isNotBlank() }.forEach { layer ->
+            val startUs = (layer.startFrac.coerceIn(0f, 1f) * totalUs).toLong()
+            val endUs = (layer.endFrac.coerceIn(layer.startFrac.coerceIn(0f, 1f), 1f) * totalUs).toLong()
+            if (timeUs in startUs..endUs) {
+                val progress = ((timeUs - startUs).toFloat() / 400_000f).coerceIn(0f, 1f)
+                val alpha = if (layer.anim == TextAnim.Fade) progress else 1f
+                val scale = if (layer.anim == TextAnim.Pop) layer.scale * (0.5f + 0.5f * progress) else layer.scale
+                val y = if (layer.anim == TextAnim.SlideUp) layer.y - 0.25f * (1f - progress) else layer.y
+                val family = when (layer.font.coerceIn(0, FONT_NAMES.lastIndex)) {
+                    1 -> FontFamily.Serif
+                    2 -> FontFamily.Monospace
+                    3 -> FontFamily.Cursive
+                    else -> FontFamily.SansSerif
+                }
+                Text(
+                    text = layer.text,
+                    color = Color(layer.color),
+                    fontSize = (72f * scale).sp,
+                    fontFamily = family,
+                    fontWeight = if (layer.bold) FontWeight.Bold else FontWeight.Normal,
+                    modifier = Modifier
+                        .offset(
+                            x = maxWidth * ((layer.x.coerceIn(-1f, 1f) + 1f) / 2f),
+                            y = maxHeight * ((1f - y.coerceIn(-1f, 1f)) / 2f)
+                        )
+                        .graphicsLayer {
+                            translationX = -size.width / 2f
+                            translationY = -size.height / 2f
+                            scaleX = if (layer.anim == TextAnim.Pop) scale / layer.scale.coerceAtLeast(0.01f) else 1f
+                            scaleY = if (layer.anim == TextAnim.Pop) scale / layer.scale.coerceAtLeast(0.01f) else 1f
+                            this.alpha = alpha
+                        }
+                        .then(if (layer.background) Modifier.background(Color(0xB3000000), RoundedCornerShape(2.dp)).padding(horizontal = 3.dp, vertical = 1.dp) else Modifier)
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun TextPanel(vm: EditorViewModel, c: Clip) {
     val sel = c.layers.firstOrNull { it.id == vm.selectedLayerId }
@@ -780,7 +830,7 @@ private fun TextPanel(vm: EditorViewModel, c: Clip) {
             FilterChip(selected = sel.anim == a, onClick = { vm.updateLayer(lid) { it.copy(anim = a) } }, label = { Text(a.label) })
         }
     }
-    Text("Preview shows text all the time. Timing and animation appear in the exported video.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+    Text("Text timing and entry animation are reflected in the preview and export. For photos, the preview shows the current frame at the start of the clip.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
     Spacer(Modifier.height(6.dp))
 
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
