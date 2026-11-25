@@ -186,16 +186,30 @@ fun EditorScreen(vm: EditorViewModel) {
                 if (clip != null && clip.isImage && !vm.previewAll) {
                     Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
                         vm.previewBitmap?.let { bmp ->
-                            Image(
-                                bitmap = bmp.asImageBitmap(), contentDescription = null,
-                                modifier = Modifier.fillMaxSize().graphicsLayer {
-                                    rotationZ = clip.rotation.toFloat()
-                                    scaleX = clip.zoom * (if (clip.flipH) -1f else 1f)
-                                    scaleY = clip.zoom * (if (clip.flipV) -1f else 1f)
-                                },
-                                contentScale = if (vm.fill) ContentScale.Crop else ContentScale.Fit,
-                                colorFilter = imageFilter(clip)
-                            )
+                            // Match export's crop-before-rotate order for selected still images.
+                            Box(Modifier.fillMaxSize().clipToBounds()) {
+                                val cropWidth = (1f - clip.cropL - clip.cropR).coerceAtLeast(0.1f)
+                                val cropHeight = (1f - clip.cropT - clip.cropB).coerceAtLeast(0.1f)
+                                Box(
+                                    Modifier.fillMaxSize().graphicsLayer {
+                                        scaleX = 1f / cropWidth
+                                        scaleY = 1f / cropHeight
+                                        translationX = size.width * (clip.cropR - clip.cropL) / (2f * cropWidth)
+                                        translationY = size.height * (clip.cropB - clip.cropT) / (2f * cropHeight)
+                                    }
+                                ) {
+                                    Image(
+                                        bitmap = bmp.asImageBitmap(), contentDescription = null,
+                                        modifier = Modifier.fillMaxSize().graphicsLayer {
+                                            rotationZ = clip.rotation.toFloat()
+                                            scaleX = clip.zoom * (if (clip.flipH) -1f else 1f)
+                                            scaleY = clip.zoom * (if (clip.flipV) -1f else 1f)
+                                        },
+                                        contentScale = if (vm.fill) ContentScale.Crop else ContentScale.Fit,
+                                        colorFilter = imageFilter(clip)
+                                    )
+                                }
+                            }
                         }
                         PhotoTextOverlays(clip, pos)
                     }
