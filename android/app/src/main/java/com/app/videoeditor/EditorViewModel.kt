@@ -3,8 +3,11 @@
 package com.app.videoeditor
 
 import android.app.Application
+import android.content.BroadcastReceiver
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
@@ -93,6 +96,21 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private var playlist: List<Clip> = emptyList()
     private var transformer: Transformer? = null
     private var exportRequestId = 0L
+    private var exportTimeoutReceiverRegistered = false
+
+    private val exportTimeoutReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != ExportService.ACTION_TIMEOUT || export !is ExportState.Running) return
+            // Do not report success: Android has ended the foreground-service time window.
+            exportRequestId++
+            transformer?.cancel()
+            transformer = null
+            export = ExportState.Failed(
+                "Android stopped this background export after its time limit. Reopen the app and try a shorter export."
+            )
+            ExportService.stop(ctx)
+        }
+    }
 
     val selected: Clip? get() = clips.firstOrNull { it.id == selectedId }
     val totalMs: Long get() = clips.sumOf { it.outputMs }
@@ -204,6 +222,14 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- init: load last project, autosave ----------
     init {
+        ContextCompat.registerReceiver(
+            ctx,
+            exportTimeoutReceiver,
+            IntentFilter(ExportService.ACTION_TIMEOUT),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        exportTimeoutReceiverRegistered = true
+
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 if (previewAll) syncPlaylistItem()
@@ -1049,6 +1075,10 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        if (exportTimeoutReceiverRegistered) {
+            runCatching { ctx.unregisterReceiver(exportTimeoutReceiver) }
+            exportTimeoutReceiverRegistered = false
+        }
         runCatching { recorder?.stop() }
         recorder?.release()
         exportRequestId++
