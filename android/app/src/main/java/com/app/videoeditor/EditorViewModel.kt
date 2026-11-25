@@ -1013,6 +1013,9 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     fun dismissExport() { export = ExportState.Idle }
 
     private fun saveToGallery(file: File): Uri? {
+        // Never publish a missing or empty export as a completed gallery video.
+        if (!file.isFile || file.length() <= 0L) return null
+
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, "VideoEditor_${System.currentTimeMillis()}.mp4")
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
@@ -1022,10 +1025,15 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val resolver = ctx.contentResolver
         val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: return null
         return try {
-            resolver.openOutputStream(uri)?.use { o -> file.inputStream().use { it.copyTo(o) } }
+            val output = resolver.openOutputStream(uri)
+                ?: throw IllegalStateException("Could not open the gallery output file")
+            output.use { stream -> file.inputStream().use { input -> input.copyTo(stream) } }
+
             values.clear()
             values.put(MediaStore.Video.Media.IS_PENDING, 0)
-            resolver.update(uri, values, null, null)
+            if (resolver.update(uri, values, null, null) <= 0) {
+                throw IllegalStateException("Could not publish the exported video")
+            }
             file.delete()
             uri
         } catch (e: Exception) {
