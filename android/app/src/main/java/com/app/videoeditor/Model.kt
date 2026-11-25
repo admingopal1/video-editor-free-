@@ -36,6 +36,14 @@ data class AudioTrack(
     val loop: Boolean = false
 )
 
+fun trimmedDurationMs(startMs: Long, endMs: Long): Long = (endMs - startMs).coerceAtLeast(0L)
+
+fun outputDurationMs(startMs: Long, endMs: Long, speed: Float): Long {
+    val trimmed = trimmedDurationMs(startMs, endMs)
+    if (speed <= 0f || speed.isNaN() || speed.isInfinite()) return 0L
+    return (trimmed / speed).toLong()
+}
+
 fun interpKeyframes(kfs: List<Keyframe>, t: Float): Keyframe {
     if (kfs.isEmpty()) return Keyframe(t)
     if (t <= kfs.first().t) return kfs.first().copy(t = t)
@@ -110,8 +118,8 @@ data class Clip(
     val layers: List<TextLayer> = emptyList(),
     val keyframes: List<Keyframe> = emptyList()
 ) {
-    val trimmedMs: Long get() = endMs - startMs
-    val outputMs: Long get() = (trimmedMs / speed).toLong()
+    val trimmedMs: Long get() = trimmedDurationMs(startMs, endMs)
+    val outputMs: Long get() = outputDurationMs(startMs, endMs, speed)
 }
 
 sealed class ExportState {
