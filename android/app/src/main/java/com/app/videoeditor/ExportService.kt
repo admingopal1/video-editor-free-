@@ -20,6 +20,17 @@ import androidx.core.content.ContextCompat
 class ExportService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /**
+     * Android 15+ can time-limit mediaProcessing foreground services.
+     * Notify the editor so it cancels the in-process Transformer, then stop promptly.
+     */
+    override fun onTimeout(startId: Int, foregroundServiceType: Int) {
+        runCatching {
+            sendBroadcast(Intent(ACTION_TIMEOUT).setPackage(packageName))
+        }
+        stopSelf(startId)
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         ensureChannel(this)
         val n = build(this, 0, "Exporting video…")
@@ -39,6 +50,7 @@ class ExportService : Service() {
         private const val ID = 4711
         private const val DONE_ID = 4712
         private const val CHANNEL = "export"
+        const val ACTION_TIMEOUT = "com.app.videoeditor.action.EXPORT_SERVICE_TIMEOUT"
 
         private fun ensureChannel(ctx: Context) {
             val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
