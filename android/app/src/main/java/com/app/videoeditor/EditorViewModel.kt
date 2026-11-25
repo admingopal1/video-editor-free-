@@ -17,6 +17,7 @@ import android.os.StatFs
 import android.os.SystemClock
 import android.provider.MediaStore
 import android.widget.Toast
+import android.util.AtomicFile
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -43,6 +44,8 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -243,18 +246,49 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         return o.toString()
     }
 
+    private val projectSaveMutex = Mutex()
+
     private suspend fun saveNow() {
-        val id = projectId
-        if (id.isEmpty()) return
-        val json = serialize()
-        val thumb = clips.firstOrNull()?.let { thumbs[it.id] }
-        withContext(Dispatchers.IO) {
-            File(projectsDir, "$id.json").writeText(json)
-            val jpg = File(projectsDir, "$id.jpg")
-            if (thumb != null) runCatching { jpg.outputStream().use { thumb.compress(Bitmap.CompressFormat.JPEG, 80, it) } }
-            else jpg.delete()
+        val saved = projectSaveMutex.withLock {
+            // Capture the project identity and matching content together before leaving the main thread.
+            val id = projectId
+            if (id.isEmpty()) return@withLock false
+            val json = serialize()
+            val thumb = clips.firstOrNull()?.let { thumbs[it.id] }
+            withContext(Dispatchers.IO) {
+                val projectFile = AtomicFile(File(projectsDir, "$id.json"))
+                var stream: java.io.FileOutputStream? = null
+                try {
+                    stream = projectFile.startWrite()
+                    stream.write(json.toByteArray(Charsets.UTF_8))
+                    projectFile.finishWrite(stream)
+                    stream = null
+                } catch (e: Exception) {
+                    stream?.let { projectFile.failWrite(it) }
+                    throw e
+                }
+
+                val jpgFile = AtomicFile(File(projectsDir, "$id.jpg"))
+                if (thumb != null) {
+                    var imageStream: java.io.FileOutputStream? = null
+                    try {
+                        imageStream = jpgFile.startWrite()
+                        if (!thumb.compress(Bitmap.CompressFormat.JPEG, 80, imageStream)) {
+                            throw IllegalStateException("Could not encode project thumbnail")
+                        }
+                        jpgFile.finishWrite(imageStream)
+                        imageStream = null
+                    } catch (e: Exception) {
+                        imageStream?.let { jpgFile.failWrite(it) }
+                        throw e
+                    }
+                } else {
+                    jpgFile.delete()
+                }
+            }
+            true
         }
-        refreshProjects()
+        if (saved) refreshProjects()
     }
 
     private suspend fun refreshProjects() {
