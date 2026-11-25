@@ -1,7 +1,7 @@
 name: Build Android APK
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, 'upgrade/**']
     paths: ['android/**', '.github/workflows/main.yml']
   workflow_dispatch:
 jobs:
