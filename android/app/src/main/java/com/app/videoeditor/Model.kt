@@ -38,6 +38,9 @@ data class AudioTrack(
 
 fun trimmedDurationMs(startMs: Long, endMs: Long): Long = (endMs - startMs).coerceAtLeast(0L)
 
+fun shouldDeleteStaleExportFile(fileName: String, lastModifiedMs: Long, cutoffMs: Long): Boolean =
+    fileName.startsWith("export_") && lastModifiedMs < cutoffMs
+
 fun outputDurationMs(startMs: Long, endMs: Long, speed: Float): Long {
     val trimmed = trimmedDurationMs(startMs, endMs)
     if (speed <= 0f || speed.isNaN() || speed.isInfinite()) return 0L
