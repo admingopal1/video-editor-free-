@@ -816,30 +816,30 @@ private fun CanvasPanel(vm: EditorViewModel) {
     Text("Aspect ratio", style = MaterialTheme.typography.bodyMedium)
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Aspect.values().forEach { a ->
-            FilterChip(selected = vm.aspect == a, onClick = { vm.setAspect(a) }, label = { Text(a.label) })
+            FilterChip(selected = vm.aspect == a, onClick = { vm.changeAspect(a) }, label = { Text(a.label) })
         }
     }
     Text("Resolution (shorter side)", style = MaterialTheme.typography.bodyMedium)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         listOf(480, 720, 1080).forEach { q ->
-            FilterChip(selected = vm.quality == q, onClick = { vm.setQuality(q) }, label = { Text("${q}p") })
+            FilterChip(selected = vm.quality == q, onClick = { vm.changeQuality(q) }, label = { Text("${q}p") })
         }
     }
     Text("Frame rate limit", style = MaterialTheme.typography.bodyMedium)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         listOf(0 to "Original", 30 to "30 fps", 24 to "24 fps").forEach { (v, label) ->
-            FilterChip(selected = vm.fps == v, onClick = { vm.setFps(v) }, label = { Text(label) })
+            FilterChip(selected = vm.fps == v, onClick = { vm.changeFps(v) }, label = { Text(label) })
         }
     }
     Text("Video quality (bitrate)", style = MaterialTheme.typography.bodyMedium)
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         listOf(0 to "Auto", 1 to "Balanced", 2 to "High", 3 to "Max").forEach { (v, label) ->
-            FilterChip(selected = vm.bitrateLevel == v, onClick = { vm.setBitrateLevel(v) }, label = { Text(label) })
+            FilterChip(selected = vm.bitrateLevel == v, onClick = { vm.changeBitrateLevel(v) }, label = { Text(label) })
         }
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("Fill frame (crop) instead of black bars", Modifier.weight(1f))
-        Switch(checked = vm.fill, onCheckedChange = { vm.setFill(it) })
+        Switch(checked = vm.fill, onCheckedChange = { vm.changeFill(it) })
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text("Show safe zones (keep text out of the red areas)", Modifier.weight(1f))
