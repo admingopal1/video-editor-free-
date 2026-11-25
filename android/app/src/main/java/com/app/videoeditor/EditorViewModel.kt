@@ -928,7 +928,14 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             val problem = withContext(Dispatchers.IO) { preflight() }
             if (requestId != exportRequestId || export !is ExportState.Running) return@launch
             if (problem != null) { export = ExportState.Failed(problem); return@launch }
-            runExport(requestId)
+            try {
+                runExport(requestId)
+            } catch (e: Exception) {
+                if (requestId == exportRequestId && export is ExportState.Running) {
+                    export = ExportState.Failed(e.message ?: "Could not start export")
+                    ExportService.stop(ctx)
+                }
+            }
         }
     }
 
@@ -958,6 +965,11 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                             if (requestId == exportRequestId && export is ExportState.Running) {
                                 export = if (uri != null) ExportState.Done(uri) else ExportState.Failed("Could not save the file. Check your free storage.")
                                 ExportService.stop(ctx, if (uri != null) "Your video is saved in Movies/VideoEditor" else null)
+                            }
+                        } catch (e: Exception) {
+                            if (requestId == exportRequestId && export is ExportState.Running) {
+                                export = ExportState.Failed(e.message ?: "Could not save the exported video")
+                                ExportService.stop(ctx)
                             }
                         } finally {
                             withContext(Dispatchers.IO) { out.delete() }
