@@ -1037,7 +1037,9 @@ private fun imageFilter(c: Clip): ColorFilter {
     var m = identity()
     fun apply(next: FloatArray) { m = multiply(next, m) }
 
-    // Match the order and broad look of buildVideoEffects() in Export.kt.
+    // Keep the same effect order as buildVideoEffects() in Export.kt.
+    if (c.brightness != 0f) apply(brightness(c.brightness))
+    if (c.contrast != 0f) apply(contrast(c.contrast))
     if (c.saturation != 0f) apply(saturation(1f + c.saturation))
     if (c.hue != 0f) apply(hue(c.hue * 180f))
     if (c.warmth != 0f) apply(scale(1f + 0.3f * c.warmth, 1f, 1f - 0.3f * c.warmth))
@@ -1067,7 +1069,5 @@ private fun imageFilter(c: Clip): ColorFilter {
         Filter.Fade -> { apply(contrast(-0.25f)); apply(brightness(0.08f)); apply(saturation(0.8f)) }
         Filter.Pop -> { apply(saturation(1.6f)); apply(contrast(0.2f)) }
     }
-    if (c.contrast != 0f) apply(contrast(c.contrast))
-    if (c.brightness != 0f) apply(brightness(c.brightness))
     return ColorFilter.colorMatrix(ColorMatrix(m))
 }
