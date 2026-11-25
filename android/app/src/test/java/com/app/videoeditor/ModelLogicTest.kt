@@ -68,4 +68,14 @@ class ModelLogicTest {
         assertEquals(0L, outputDurationMs(0L, 5_000L, -1f))
     }
 
+    @Test
+    fun staleExportCleanupOnlyDeletesOldExportFiles() {
+        val cutoff = 100_000L
+
+        assertEquals(true, shouldDeleteStaleExportFile("export_old.mp4", 99_999L, cutoff))
+        assertEquals(false, shouldDeleteStaleExportFile("export_recent.mp4", 99_999L + 1L, cutoff))
+        assertEquals(false, shouldDeleteStaleExportFile("silence_temp.mp4", 1L, cutoff))
+        assertEquals(false, shouldDeleteStaleExportFile("export_future.mp4", 100_001L, cutoff))
+    }
+
 }
