@@ -168,31 +168,31 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         restore(redoStack.removeLast())
     }
 
-    fun setAspect(value: Aspect) {
+    fun changeAspect(value: Aspect) {
         if (aspect == value) return
         record(true)
         aspect = value
     }
 
-    fun setQuality(value: Int) {
+    fun changeQuality(value: Int) {
         if (quality == value) return
         record(true)
         quality = value
     }
 
-    fun setFill(value: Boolean) {
+    fun changeFill(value: Boolean) {
         if (fill == value) return
         record(true)
         fill = value
     }
 
-    fun setFps(value: Int) {
+    fun changeFps(value: Int) {
         if (fps == value) return
         record(true)
         fps = value
     }
 
-    fun setBitrateLevel(value: Int) {
+    fun changeBitrateLevel(value: Int) {
         if (bitrateLevel == value) return
         record(true)
         bitrateLevel = value
