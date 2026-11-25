@@ -211,7 +211,13 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         })
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                ctx.cacheDir.listFiles { f -> f.name.startsWith("export_") || f.name.startsWith("silence_") }?.forEach { it.delete() }
+                // Keep recent exports intact; remove only abandoned temporary exports.
+                val staleExportBefore = System.currentTimeMillis() - 24L * 60L * 60L * 1000L
+                ctx.cacheDir.listFiles { f -> f.name.startsWith("export_") }?.forEach { file ->
+                    if (file.lastModified() < staleExportBefore) file.delete()
+                }
+                // Silence files are short-lived intermediate assets and can be cleared on startup.
+                ctx.cacheDir.listFiles { f -> f.name.startsWith("silence_") }?.forEach { it.delete() }
                 migrateOldProject()
             }
             refreshProjects()
