@@ -968,28 +968,106 @@ private fun WaveBars(peaks: FloatArray?, startMs: Long, endMs: Long, color: Colo
     }
 }
 
-/** Approximate colour look for the photo preview (the export uses the full effect chain). */
-private fun imageFilter(c: Clip): ColorFilter? {
-    val m = ColorMatrix()
-    m.setToSaturation((1f + c.saturation).coerceAtLeast(0f))
-    val v = m.values
+/** Compose-side photo colour preview. Export uses Media3's equivalent effect chain. */
+private fun imageFilter(c: Clip): ColorFilter {
+    fun identity() = floatArrayOf(
+        1f, 0f, 0f, 0f, 0f,
+        0f, 1f, 0f, 0f, 0f,
+        0f, 0f, 1f, 0f, 0f,
+        0f, 0f, 0f, 1f, 0f
+    )
+    fun multiply(a: FloatArray, b: FloatArray): FloatArray {
+        val out = FloatArray(20)
+        for (r in 0..3) {
+            for (col in 0..3) {
+                for (k in 0..3) out[r * 5 + col] += a[r * 5 + k] * b[k * 5 + col]
+            }
+            out[r * 5 + 4] = a[r * 5 + 4]
+            for (k in 0..3) out[r * 5 + 4] += a[r * 5 + k] * b[k * 5 + 4]
+        }
+        return out
+    }
+    fun scale(r: Float, g: Float, b: Float) = floatArrayOf(
+        r, 0f, 0f, 0f, 0f,
+        0f, g, 0f, 0f, 0f,
+        0f, 0f, b, 0f, 0f,
+        0f, 0f, 0f, 1f, 0f
+    )
+    fun saturation(amount: Float): FloatArray {
+        val s = amount.coerceAtLeast(0f)
+        val inv = 1f - s
+        val r = 0.213f * inv; val g = 0.715f * inv; val b = 0.072f * inv
+        return floatArrayOf(
+            r + s, g, b, 0f, 0f,
+            r, g + s, b, 0f, 0f,
+            r, g, b + s, 0f, 0f,
+            0f, 0f, 0f, 1f, 0f
+        )
+    }
+    fun contrast(amount: Float): FloatArray {
+        val f = (1f + amount).coerceAtLeast(0f)
+        val offset = 128f * (1f - f)
+        return floatArrayOf(
+            f, 0f, 0f, 0f, offset,
+            0f, f, 0f, 0f, offset,
+            0f, 0f, f, 0f, offset,
+            0f, 0f, 0f, 1f, 0f
+        )
+    }
+    fun hue(degrees: Float): FloatArray {
+        val rad = Math.toRadians(degrees.toDouble())
+        val cos = kotlin.math.cos(rad).toFloat()
+        val sin = kotlin.math.sin(rad).toFloat()
+        return floatArrayOf(
+            0.213f + cos * 0.787f - sin * 0.213f, 0.715f - cos * 0.715f - sin * 0.715f, 0.072f - cos * 0.072f + sin * 0.928f, 0f, 0f,
+            0.213f - cos * 0.213f + sin * 0.143f, 0.715f + cos * 0.285f + sin * 0.140f, 0.072f - cos * 0.072f - sin * 0.283f, 0f, 0f,
+            0.213f - cos * 0.213f - sin * 0.787f, 0.715f - cos * 0.715f + sin * 0.715f, 0.072f + cos * 0.928f + sin * 0.072f, 0f, 0f,
+            0f, 0f, 0f, 1f, 0f
+        )
+    }
+    fun brightness(amount: Float): FloatArray {
+        val offset = 255f * amount
+        return floatArrayOf(
+            1f, 0f, 0f, 0f, offset,
+            0f, 1f, 0f, 0f, offset,
+            0f, 0f, 1f, 0f, offset,
+            0f, 0f, 0f, 1f, 0f
+        )
+    }
+    var m = identity()
+    fun apply(next: FloatArray) { m = multiply(next, m) }
+
+    // Match the order and broad look of buildVideoEffects() in Export.kt.
+    if (c.saturation != 0f) apply(saturation(1f + c.saturation))
+    if (c.hue != 0f) apply(hue(c.hue * 180f))
+    if (c.warmth != 0f) apply(scale(1f + 0.3f * c.warmth, 1f, 1f - 0.3f * c.warmth))
     when (c.filter) {
-        Filter.Gray, Filter.Noir -> ColorMatrix().also { it.setToSaturation(0f) }.values.copyInto(v)
-        Filter.Sepia, Filter.Vintage -> floatArrayOf(
+        Filter.None -> {}
+        Filter.Gray -> apply(saturation(0f))
+        Filter.Noir -> { apply(saturation(0f)); apply(contrast(0.3f)) }
+        Filter.Invert -> apply(floatArrayOf(
+            -1f, 0f, 0f, 0f, 255f, 0f, -1f, 0f, 0f, 255f,
+            0f, 0f, -1f, 0f, 255f, 0f, 0f, 0f, 1f, 0f
+        ))
+        Filter.Sepia -> apply(floatArrayOf(
             0.393f, 0.769f, 0.189f, 0f, 0f,
             0.349f, 0.686f, 0.168f, 0f, 0f,
             0.272f, 0.534f, 0.131f, 0f, 0f,
             0f, 0f, 0f, 1f, 0f
-        ).copyInto(v)
-        Filter.Invert -> floatArrayOf(
-            -1f, 0f, 0f, 0f, 255f,
-            0f, -1f, 0f, 0f, 255f,
-            0f, 0f, -1f, 0f, 255f,
-            0f, 0f, 0f, 1f, 0f
-        ).copyInto(v)
-        else -> {}
+        ))
+        Filter.Vintage -> {
+            apply(saturation(0.7f)); apply(scale(1.1f, 1f, 0.85f))
+        }
+        Filter.Cinema -> {
+            apply(scale(1.08f, 0.97f, 1.05f)); apply(contrast(0.2f)); apply(saturation(1.1f))
+        }
+        Filter.Warm -> apply(scale(1.15f, 1f, 0.88f))
+        Filter.Cool -> apply(scale(0.88f, 1f, 1.15f))
+        Filter.Vivid -> { apply(saturation(1.4f)); apply(contrast(0.15f)) }
+        Filter.Fade -> { apply(contrast(-0.25f)); apply(brightness(0.08f)); apply(saturation(0.8f)) }
+        Filter.Pop -> { apply(saturation(1.6f)); apply(contrast(0.2f)) }
     }
-    val b = 255f * c.brightness
-    v[4] += b; v[9] += b; v[14] += b
-    return ColorFilter.colorMatrix(m)
+    if (c.contrast != 0f) apply(contrast(c.contrast))
+    if (c.brightness != 0f) apply(brightness(c.brightness))
+    return ColorFilter.colorMatrix(ColorMatrix(m))
 }
