@@ -29,6 +29,8 @@ jobs:
         run: |
           echo "$KS" | base64 -d > "$RUNNER_TEMP/release.jks"
           echo "KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+      - name: Run unit tests
+        run: gradle testDebugUnitTest --no-daemon --stacktrace
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
       - name: Build signed release (APK + AAB)
