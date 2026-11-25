@@ -80,7 +80,7 @@ class ExportService : Service() {
             } catch (e: Exception) { }
         }
 
-        fun stop(ctx: Context, finishedText: String? = null) {
+        fun stop(ctx: Context, finishedText: String? = null, isError: Boolean = false) {
             try { ctx.stopService(Intent(ctx, ExportService::class.java)) } catch (e: Exception) { }
             if (finishedText != null) {
                 try {
@@ -89,7 +89,7 @@ class ExportService : Service() {
                     nm.notify(
                         DONE_ID,
                         NotificationCompat.Builder(ctx, CHANNEL)
-                            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+                            .setSmallIcon(if (isError) android.R.drawable.stat_notify_error else android.R.drawable.stat_sys_upload_done)
                             .setContentTitle("Video Editor")
                             .setContentText(finishedText)
                             .setAutoCancel(true)

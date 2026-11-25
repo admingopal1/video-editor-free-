@@ -20,6 +20,7 @@ import android.os.StatFs
 import android.os.SystemClock
 import android.provider.MediaStore
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 import android.util.AtomicFile
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -44,6 +45,7 @@ import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.VideoEncoderSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
@@ -95,20 +97,20 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private var pendingSeek = -1L
     private var playlist: List<Clip> = emptyList()
     private var transformer: Transformer? = null
-    private var exportRequestId = 0L
+    private val exportTracker = ExportRequestTracker()
+    private var exportFile: File? = null
     private var exportTimeoutReceiverRegistered = false
 
     private val exportTimeoutReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action != ExportService.ACTION_TIMEOUT || export !is ExportState.Running) return
             // Do not report success: Android has ended the foreground-service time window.
-            exportRequestId++
-            transformer?.cancel()
-            transformer = null
+            exportTracker.cancel()
+            abandonExport(immediate = false)
             export = ExportState.Failed(
                 "Android stopped this background export after its time limit. Reopen the app and try a shorter export."
             )
-            ExportService.stop(ctx)
+            ExportService.stop(ctx, "Export stopped: Android's background time limit was reached. Open the app and try again.", isError = true)
         }
     }
 
@@ -422,6 +424,14 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun loadInto(id: String): Boolean {
         val raw = withContext(Dispatchers.IO) { runCatching { File(projectsDir, "$id.json").readText() }.getOrNull() } ?: return false
         val l = withContext(Dispatchers.IO) { loadFromJson(raw) } ?: return false
+        if (l.dropped > 0) {
+            // Missing media is removed from the open project. Keep the untouched original once, so
+            // clips that were only temporarily unavailable (e.g. storage not mounted) are not lost for good.
+            withContext(Dispatchers.IO) {
+                val bak = File(projectsDir, "$id.json.bak")
+                if (!bak.exists()) runCatching { bak.writeText(raw) }
+            }
+        }
         applyLoaded(id, l)
         return true
     }
@@ -486,8 +496,12 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val wasCurrent = id == projectId
         if (wasCurrent) projectId = ""   // stop autosave from re-creating it
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                File(projectsDir, "$id.json").delete(); File(projectsDir, "$id.jpg").delete()
+            // Wait for any in-flight autosave so it cannot re-create the deleted project.
+            projectSaveMutex.withLock {
+                withContext(Dispatchers.IO) {
+                    File(projectsDir, "$id.json").delete(); File(projectsDir, "$id.jpg").delete()
+                    File(projectsDir, "$id.json.bak").delete()
+                }
             }
             refreshProjects()
             if (wasCurrent) {
@@ -952,18 +966,22 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun startExport() {
-        if (clips.isEmpty() || export is ExportState.Running) return
-        val requestId = ++exportRequestId
+        if (clips.isEmpty() || export is ExportState.Running || exportTracker.isRunning) return
+        val requestId = exportTracker.begin()
         player.pause()
         export = ExportState.Running(0f)
         viewModelScope.launch {
             val problem = withContext(Dispatchers.IO) { preflight() }
-            if (requestId != exportRequestId || export !is ExportState.Running) return@launch
-            if (problem != null) { export = ExportState.Failed(problem); return@launch }
+            if (!exportTracker.owns(requestId)) return@launch
+            if (problem != null) {
+                if (exportTracker.finish(requestId)) export = ExportState.Failed(problem)
+                return@launch
+            }
             try {
                 runExport(requestId)
             } catch (e: Exception) {
-                if (requestId == exportRequestId && export is ExportState.Running) {
+                abandonExport(immediate = false)
+                if (exportTracker.finish(requestId)) {
                     export = ExportState.Failed(e.message ?: "Could not start export")
                     ExportService.stop(ctx)
                 }
@@ -991,39 +1009,60 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             .addListener(object : Transformer.Listener {
                 override fun onCompleted(composition: Composition, exportResult: ExportResult) {
                     viewModelScope.launch {
+                        var publishedUri: Uri? = null
                         try {
-                            if (requestId != exportRequestId || export !is ExportState.Running) return@launch
-                            val uri = withContext(Dispatchers.IO) { saveToGallery(out) }
-                            if (requestId == exportRequestId && export is ExportState.Running) {
-                                export = if (uri != null) ExportState.Done(uri) else ExportState.Failed("Could not save the file. Check your free storage.")
-                                ExportService.stop(ctx, if (uri != null) "Your video is saved in Movies/VideoEditor" else null)
+                            // A cancelled or superseded export must never reach the gallery.
+                            if (!exportTracker.owns(requestId)) return@launch
+                            publishedUri = withContext(Dispatchers.IO) { saveToGallery(out) }
+                            if (exportTracker.finish(requestId)) {
+                                transformer = null
+                                exportFile = null
+                                val uri = publishedUri
+                                if (uri != null) {
+                                    export = ExportState.Done(uri)
+                                    ExportService.stop(ctx, "Your video is saved in Movies/VideoEditor")
+                                } else {
+                                    export = ExportState.Failed("Could not save the file. Check your free storage.")
+                                    ExportService.stop(ctx)
+                                }
+                                publishedUri = null   // ownership moved to the Done state
                             }
                         } catch (e: Exception) {
-                            if (requestId == exportRequestId && export is ExportState.Running) {
+                            if (exportTracker.finish(requestId)) {
+                                transformer = null
+                                exportFile = null
                                 export = ExportState.Failed(e.message ?: "Could not save the exported video")
                                 ExportService.stop(ctx)
                             }
                         } finally {
-                            withContext(Dispatchers.IO) { out.delete() }
+                            // Cancelled while saving: take the half-published video back out of the gallery.
+                            val orphan = publishedUri
+                            withContext(NonCancellable + Dispatchers.IO) {
+                                if (orphan != null) runCatching { ctx.contentResolver.delete(orphan, null, null) }
+                                out.delete()
+                            }
                         }
                     }
                 }
 
                 override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
                     out.delete()
-                    if (requestId == exportRequestId && export is ExportState.Running) {
+                    if (exportTracker.finish(requestId)) {
+                        transformer = null
+                        exportFile = null
                         export = ExportState.Failed(exportException.message ?: "Export failed")
                         ExportService.stop(ctx)
                     }
                 }
             }).build()
         transformer = t
+        exportFile = out
         ExportService.start(ctx)
         t.start(comp, out.absolutePath)
 
         viewModelScope.launch {
             val holder = ProgressHolder()
-            while (export is ExportState.Running) {
+            while (exportTracker.owns(requestId) && export is ExportState.Running) {
                 if (t.getProgress(holder) != Transformer.PROGRESS_STATE_NOT_STARTED) {
                     export = ExportState.Running(holder.progress / 100f)
                     ExportService.progress(ctx, holder.progress)
@@ -1033,11 +1072,31 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun cancelExport() {
-        // Invalidate pending preflight work so it cannot start an export after cancellation.
-        exportRequestId++
-        transformer?.cancel()
+    /**
+     * Stops the Transformer and removes its temporary file. Deleting is delayed briefly so the encoder
+     * has finished releasing the file; leftovers are also cleared by the stale-export cleanup on startup.
+     */
+    private fun abandonExport(immediate: Boolean) {
+        val t = transformer
+        val f = exportFile
         transformer = null
+        exportFile = null
+        runCatching { t?.cancel() }
+        if (f == null) return
+        if (immediate) {
+            runCatching { f.delete() }
+        } else {
+            viewModelScope.launch(Dispatchers.IO) {
+                delay(1500)
+                runCatching { f.delete() }
+            }
+        }
+    }
+
+    fun cancelExport() {
+        // Invalidates preflight, Transformer and gallery-save callbacks of the running export.
+        exportTracker.cancel()
+        abandonExport(immediate = false)
         export = ExportState.Idle
         ExportService.stop(ctx)
     }
@@ -1081,9 +1140,11 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         }
         runCatching { recorder?.stop() }
         recorder?.release()
-        exportRequestId++
-        transformer?.cancel()
-        transformer = null
+        if (exportTracker.isRunning) {
+            exportTracker.cancel()
+            ExportService.stop(ctx)   // do not leave the foreground notification behind
+        }
+        abandonExport(immediate = true)
         player.release()
     }
 }
