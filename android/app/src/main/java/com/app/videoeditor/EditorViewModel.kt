@@ -93,18 +93,49 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     val selected: Clip? get() = clips.firstOrNull { it.id == selectedId }
     val totalMs: Long get() = clips.sumOf { it.outputMs }
 
-    // ---------- undo / redo ----------
-    private val undoStack = ArrayDeque<List<Clip>>()
-    private val redoStack = ArrayDeque<List<Clip>>()
+    // ---------- complete project undo / redo ----------
+    private data class EditorSnapshot(
+        val clips: List<Clip>,
+        val audioTracks: List<AudioTrack>,
+        val aspect: Aspect,
+        val quality: Int,
+        val fill: Boolean,
+        val fps: Int,
+        val bitrateLevel: Int
+    )
+
+    private val undoStack = ArrayDeque<EditorSnapshot>()
+    private val redoStack = ArrayDeque<EditorSnapshot>()
     var undoCount by mutableIntStateOf(0); private set
     var redoCount by mutableIntStateOf(0); private set
     private var lastRecord = 0L
+
+    private fun snapshot(): EditorSnapshot = EditorSnapshot(
+        clips = clips.toList(),
+        audioTracks = audioTracks.toList(),
+        aspect = aspect,
+        quality = quality,
+        fill = fill,
+        fps = fps,
+        bitrateLevel = bitrateLevel
+    )
+
+    private fun restore(snapshot: EditorSnapshot) {
+        clips = snapshot.clips
+        audioTracks = snapshot.audioTracks
+        aspect = snapshot.aspect
+        quality = snapshot.quality
+        fill = snapshot.fill
+        fps = snapshot.fps
+        bitrateLevel = snapshot.bitrateLevel
+        fixSelection()
+    }
 
     private fun record(force: Boolean = false) {
         leavePlayAll()
         val now = SystemClock.uptimeMillis()
         if (force || now - lastRecord > 800) {
-            undoStack.addLast(clips)
+            undoStack.addLast(snapshot())
             if (undoStack.size > 60) undoStack.removeFirst()
             redoStack.clear()
         }
@@ -115,19 +146,56 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private fun fixSelection() {
         leavePlayAll()
         if (clips.none { it.id == selectedId }) selectedId = clips.firstOrNull()?.id
-        if (clips.isEmpty()) { previewKey = null; previewImageId = -1L; previewBitmap = null; player.clearMediaItems() }
+        if (clips.isEmpty()) {
+            previewKey = null; previewImageId = -1L; previewBitmap = null
+            player.clearMediaItems()
+        } else {
+            selected?.let { applyPreview(it) }
+        }
         undoCount = undoStack.size; redoCount = redoStack.size
         lastRecord = 0L
     }
 
     fun undo() {
         if (undoStack.isEmpty()) return
-        redoStack.addLast(clips); clips = undoStack.removeLast(); fixSelection()
+        redoStack.addLast(snapshot())
+        restore(undoStack.removeLast())
     }
 
     fun redo() {
         if (redoStack.isEmpty()) return
-        undoStack.addLast(clips); clips = redoStack.removeLast(); fixSelection()
+        undoStack.addLast(snapshot())
+        restore(redoStack.removeLast())
+    }
+
+    fun setAspect(value: Aspect) {
+        if (aspect == value) return
+        record(true)
+        aspect = value
+    }
+
+    fun setQuality(value: Int) {
+        if (quality == value) return
+        record(true)
+        quality = value
+    }
+
+    fun setFill(value: Boolean) {
+        if (fill == value) return
+        record(true)
+        fill = value
+    }
+
+    fun setFps(value: Int) {
+        if (fps == value) return
+        record(true)
+        fps = value
+    }
+
+    fun setBitrateLevel(value: Int) {
+        if (bitrateLevel == value) return
+        record(true)
+        bitrateLevel = value
     }
 
     // ---------- init: load last project, autosave ----------
@@ -485,16 +553,22 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun addAudio(uri: Uri, name: String? = null, offsetMs: Long = 0L) {
         if (audioTracks.size >= 4) { toast("Up to 4 audio tracks"); return }
+        record(true)
         val first = audioTracks.isEmpty() && offsetMs == 0L
         audioTracks = audioTracks + AudioTrack(nextId++, uri, name ?: displayName(uri), loop = first, offsetMs = offsetMs)
         ensureWaveform(uri)
     }
 
     fun updateAudio(id: Long, f: (AudioTrack) -> AudioTrack) {
+        record()
         audioTracks = audioTracks.map { if (it.id == id) f(it) else it }
     }
 
-    fun removeAudio(id: Long) { audioTracks = audioTracks.filter { it.id != id } }
+    fun removeAudio(id: Long) {
+        if (audioTracks.none { it.id == id }) return
+        record(true)
+        audioTracks = audioTracks.filter { it.id != id }
+    }
 
     fun ensureWaveform(uri: Uri) {
         val key = uri.toString()
@@ -751,6 +825,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- export ----------
     fun applyPreset(kind: Int) {
+        record(true)
         when (kind) {
             0 -> { aspect = Aspect.R9x16; quality = 1080; fill = true; fps = 30; bitrateLevel = 2 }   // Reels / Shorts / TikTok
             1 -> { aspect = Aspect.R16x9; quality = 1080; fill = true; fps = 0; bitrateLevel = 2 }    // YouTube
