@@ -187,12 +187,14 @@ private fun styledText(t: TextLayer): SpannableString {
     return s
 }
 
-/** Text that only shows between startFrac..endFrac of the clip and can animate in (export only). */
+/** Time-aware text overlay shared by preview and export. */
 private fun timedOverlay(c: Clip, t: TextLayer): TextureOverlay {
     val text = styledText(t)
     val total = (c.outputMs * 1000L).coerceAtLeast(1L)
-    val startUs = (t.startFrac * total).toLong()
-    val endUs = (t.endFrac * total).toLong()
+    val startFrac = t.startFrac.coerceIn(0f, 1f)
+    val endFrac = t.endFrac.coerceIn(startFrac, 1f)
+    val startUs = (startFrac * total).toLong()
+    val endUs = (endFrac * total).toLong()
     val animUs = 400_000L
     val tb = TimeBase()
     return object : TextOverlay() {
@@ -200,7 +202,7 @@ private fun timedOverlay(c: Clip, t: TextLayer): TextureOverlay {
 
         override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings {
             val r = tb.rel(presentationTimeUs)
-            val visible = r in startUs..endUs
+            val visible = r >= startUs && r <= endUs
             var alpha = if (visible) 1f else 0f
             var scale = t.scale
             var y = t.y
@@ -222,9 +224,9 @@ private fun timedOverlay(c: Clip, t: TextLayer): TextureOverlay {
     }
 }
 
-private fun textOverlays(c: Clip, forExport: Boolean): List<TextureOverlay> =
+private fun textOverlays(c: Clip): List<TextureOverlay> =
     c.layers.filter { it.text.isNotBlank() }.map { t ->
-        if (forExport && (t.startFrac > 0f || t.endFrac < 1f || t.anim != TextAnim.None)) {
+        if (t.startFrac > 0f || t.endFrac < 1f || t.anim != TextAnim.None) {
             timedOverlay(c, t)
         } else {
             TextOverlay.createStaticTextOverlay(
@@ -302,7 +304,7 @@ fun buildVideoEffects(c: Clip, presentation: Presentation?, forExport: Boolean, 
     if (forExport && fps > 0) l += FrameDropEffect.createDefaultFrameDropEffect(fps.toFloat())
     if (presentation != null) l += presentation
 
-    val overlays = textOverlays(c, forExport)
+    val overlays = textOverlays(c)
     if (overlays.isNotEmpty()) l += OverlayEffect(ImmutableList.copyOf<TextureOverlay>(overlays))
     return l
 }
