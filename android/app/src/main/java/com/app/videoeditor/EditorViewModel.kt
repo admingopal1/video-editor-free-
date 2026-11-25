@@ -708,11 +708,20 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private fun toast(msg: String) = Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
 
     // ---------- preview ----------
-    private fun clipItem(c: Clip): MediaItem = MediaItem.Builder().setUri(c.uri)
-        .setClippingConfiguration(
-            MediaItem.ClippingConfiguration.Builder()
-                .setStartPositionMs(c.startMs).setEndPositionMs(c.endMs).build()
-        ).build()
+    private fun clipItem(c: Clip): MediaItem {
+        val builder = MediaItem.Builder().setUri(c.uri)
+        return if (c.isImage) {
+            // ExoPlayer needs an explicit display duration for still-image playlist items.
+            builder.setImageDurationMs(c.trimmedMs.coerceAtLeast(1L)).build()
+        } else {
+            builder.setClippingConfiguration(
+                MediaItem.ClippingConfiguration.Builder()
+                    .setStartPositionMs(c.startMs)
+                    .setEndPositionMs(c.endMs)
+                    .build()
+            ).build()
+        }
+    }
 
     private fun applyClipSettings(c: Clip, kfFrac: Float = -1f) {
         player.setPlaybackParameters(PlaybackParameters(c.speed))
@@ -758,24 +767,35 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // ---- play the whole project (video clips, in order) ----
+    // ---- play the complete project timeline (video and photo clips, in order) ----
     fun playAll() {
-        val vids = clips.filter { !it.isImage }
-        if (vids.isEmpty()) { toast("Add a video first"); return }
+        if (clips.isEmpty()) { toast("Add media first"); return }
+        val items = clips.toList()
         previewBitmap = null; previewImageId = -1L
-        playlist = vids; previewAll = true; previewKey = null
-        val start = vids.indexOfFirst { it.id == selectedId }.coerceAtLeast(0)
-        player.setMediaItems(vids.map { clipItem(it) }, start, 0L)
+        playlist = items; previewAll = true; previewKey = null
+        val start = items.indexOfFirst { it.id == selectedId }.coerceAtLeast(0)
+        player.setMediaItems(items.map { clipItem(it) }, start, 0L)
         player.prepare()
-        applyClipSettings(vids[start])
-        selectedId = vids[start].id
+        selectedId = items[start].id
+        applyPlaylistClipSettings(items[start])
         player.play()
+    }
+
+    private fun applyPlaylistClipSettings(c: Clip) {
+        if (c.isImage) {
+            // Still images have no source audio. Clear prior clip settings at the boundary.
+            player.setPlaybackParameters(PlaybackParameters(1f))
+            player.volume = 0f
+            player.setVideoEffects(emptyList())
+        } else {
+            applyClipSettings(c)
+        }
     }
 
     private fun syncPlaylistItem() {
         val c = playlist.getOrNull(player.currentMediaItemIndex) ?: return
         selectedId = c.id
-        applyClipSettings(c)
+        applyPlaylistClipSettings(c)
     }
 
     fun stopPlayAll() {
