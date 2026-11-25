@@ -92,6 +92,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private var pendingSeek = -1L
     private var playlist: List<Clip> = emptyList()
     private var transformer: Transformer? = null
+    private var exportRequestId = 0L
 
     val selected: Clip? get() = clips.firstOrNull { it.id == selectedId }
     val totalMs: Long get() = clips.sumOf { it.outputMs }
@@ -920,16 +921,18 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun startExport() {
         if (clips.isEmpty() || export is ExportState.Running) return
+        val requestId = ++exportRequestId
         player.pause()
         export = ExportState.Running(0f)
         viewModelScope.launch {
             val problem = withContext(Dispatchers.IO) { preflight() }
+            if (requestId != exportRequestId || export !is ExportState.Running) return@launch
             if (problem != null) { export = ExportState.Failed(problem); return@launch }
-            runExport()
+            runExport(requestId)
         }
     }
 
-    private fun runExport() {
+    private fun runExport(requestId: Long) {
         val (w, h) = outputSize()
         val layout = if (fill) Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP else Presentation.LAYOUT_SCALE_TO_FIT
         val comp = buildComposition(ctx, clips, Presentation.createForWidthAndHeight(w, h, layout), audioTracks, fps)
@@ -949,16 +952,25 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             .addListener(object : Transformer.Listener {
                 override fun onCompleted(composition: Composition, exportResult: ExportResult) {
                     viewModelScope.launch {
-                        val uri = withContext(Dispatchers.IO) { saveToGallery(out) }
-                        export = if (uri != null) ExportState.Done(uri) else ExportState.Failed("Could not save the file. Check your free storage.")
-                        ExportService.stop(ctx, if (uri != null) "Your video is saved in Movies/VideoEditor" else null)
+                        try {
+                            if (requestId != exportRequestId || export !is ExportState.Running) return@launch
+                            val uri = withContext(Dispatchers.IO) { saveToGallery(out) }
+                            if (requestId == exportRequestId && export is ExportState.Running) {
+                                export = if (uri != null) ExportState.Done(uri) else ExportState.Failed("Could not save the file. Check your free storage.")
+                                ExportService.stop(ctx, if (uri != null) "Your video is saved in Movies/VideoEditor" else null)
+                            }
+                        } finally {
+                            withContext(Dispatchers.IO) { out.delete() }
+                        }
                     }
                 }
 
                 override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
                     out.delete()
-                    export = ExportState.Failed(exportException.message ?: "Export failed")
-                    ExportService.stop(ctx)
+                    if (requestId == exportRequestId && export is ExportState.Running) {
+                        export = ExportState.Failed(exportException.message ?: "Export failed")
+                        ExportService.stop(ctx)
+                    }
                 }
             }).build()
         transformer = t
@@ -978,7 +990,10 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun cancelExport() {
+        // Invalidate pending preflight work so it cannot start an export after cancellation.
+        exportRequestId++
         transformer?.cancel()
+        transformer = null
         export = ExportState.Idle
         ExportService.stop(ctx)
     }
@@ -1010,7 +1025,9 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         runCatching { recorder?.stop() }
         recorder?.release()
+        exportRequestId++
         transformer?.cancel()
+        transformer = null
         player.release()
     }
 }
