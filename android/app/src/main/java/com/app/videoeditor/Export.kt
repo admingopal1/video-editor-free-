@@ -2,6 +2,7 @@
 
 package com.app.videoeditor
 
+import android.content.Context
 import android.graphics.Matrix
 import android.graphics.Typeface
 import android.net.Uri
@@ -84,6 +85,71 @@ private fun animEffect(c: Clip): Effect? {
             return m
         }
     }
+}
+
+private fun diagMatrix(o: Float): FloatArray {
+    val f = o.coerceIn(0f, 1f)
+    return floatArrayOf(
+        f, 0f, 0f, 0f,
+        0f, f, 0f, 0f,
+        0f, 0f, f, 0f,
+        0f, 0f, 0f, 1f
+    )
+}
+
+private fun frameAspect(c: Clip): Float {
+    var w = c.width * (1f - c.cropL - c.cropR)
+    var h = c.height * (1f - c.cropT - c.cropB)
+    if (c.rotation == 90 || c.rotation == 270) { val t = w; w = h; h = t }
+    return (w / h.coerceAtLeast(1f)).coerceIn(0.2f, 5f)
+}
+
+private fun kfMatrix(c: Clip, k: Keyframe): Matrix {
+    val a = frameAspect(c)
+    val m = Matrix()
+    m.postScale(k.scale, k.scale)
+    if (k.rotation != 0f) {
+        m.postScale(a, 1f); m.postRotate(k.rotation); m.postScale(1f / a, 1f)
+    }
+    m.postTranslate(k.x, k.y)
+    return m
+}
+
+/** Keyframe animation. Export animates over time; preview shows the values at the playhead. */
+private fun kfEffects(c: Clip, previewFrac: Float, forExport: Boolean): List<Effect> {
+    if (c.keyframes.isEmpty()) return emptyList()
+    val kfs = c.keyframes.sortedBy { it.t }
+    val out = mutableListOf<Effect>()
+    if (forExport) {
+        val total = (c.outputMs * 1000L).coerceAtLeast(1L)
+        val tb = TimeBase()
+        out += object : MatrixTransformation {
+            override fun getMatrix(presentationTimeUs: Long): Matrix {
+                val f = (tb.rel(presentationTimeUs).toFloat() / total).coerceIn(0f, 1f)
+                return kfMatrix(c, interpKeyframes(kfs, f))
+            }
+        }
+        if (kfs.any { it.opacity != 1f }) {
+            val tb2 = TimeBase()
+            out += object : RgbMatrix {
+                override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray {
+                    val f = (tb2.rel(presentationTimeUs).toFloat() / total).coerceIn(0f, 1f)
+                    return diagMatrix(interpKeyframes(kfs, f).opacity)
+                }
+            }
+        }
+    } else if (previewFrac >= 0f) {
+        val k = interpKeyframes(kfs, previewFrac)
+        out += object : MatrixTransformation {
+            override fun getMatrix(presentationTimeUs: Long): Matrix = kfMatrix(c, k)
+        }
+        if (k.opacity != 1f) {
+            out += object : RgbMatrix {
+                override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray = diagMatrix(k.opacity)
+            }
+        }
+    }
+    return out
 }
 
 private fun fadeEffect(c: Clip): Effect? {
@@ -172,7 +238,7 @@ private fun textOverlays(c: Clip, forExport: Boolean): List<TextureOverlay> =
     }
 
 /** Visual effects for one clip. Time-based effects (animation, fade) and speed are export-only. */
-fun buildVideoEffects(c: Clip, presentation: Presentation?, forExport: Boolean, fps: Int = 0): List<Effect> {
+fun buildVideoEffects(c: Clip, presentation: Presentation?, forExport: Boolean, fps: Int = 0, kfFrac: Float = -1f): List<Effect> {
     val l = mutableListOf<Effect>()
     if (forExport && c.speed != 1f && !c.isImage) l += SpeedChangeEffect(c.speed)
 
@@ -188,6 +254,7 @@ fun buildVideoEffects(c: Clip, presentation: Presentation?, forExport: Boolean, 
             .build()
     }
     if (forExport) animEffect(c)?.let { l += it }
+    l += kfEffects(c, kfFrac, forExport)
 
     if (c.brightness != 0f) l += Brightness(c.brightness)
     if (c.contrast != 0f) l += Contrast(c.contrast)
@@ -253,10 +320,10 @@ fun volumeProcessor(v: Float): AudioProcessor = ChannelMixingAudioProcessor().ap
 }
 
 fun buildComposition(
+    ctx: Context,
     clips: List<Clip>,
     presentation: Presentation,
-    music: Uri?,
-    musicVolume: Float,
+    tracks: List<AudioTrack>,
     fps: Int = 0
 ): Composition {
     val items = clips.map { c ->
@@ -279,16 +346,26 @@ fun buildComposition(
         builder.setEffects(Effects(buildAudioProcessors(c), buildVideoEffects(c, presentation, true, fps))).build()
     }
     val sequences = mutableListOf(EditedMediaItemSequence(items))
-    if (music != null) {
-        val audioItem = EditedMediaItem.Builder(MediaItem.fromUri(music))
+
+    val totalMs = clips.sumOf { it.outputMs }
+    var loopUsed = false
+    for (t in tracks) {
+        if (t.offsetMs >= totalMs) continue
+        val audioItems = mutableListOf<EditedMediaItem>()
+        if (t.offsetMs > 0L) {
+            audioItems += EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(makeSilence(ctx, t.offsetMs))))
+                .setRemoveVideo(true).build()
+        }
+        val loop = t.loop && t.offsetMs == 0L && !loopUsed
+        if (loop) loopUsed = true
+        val clipping = MediaItem.ClippingConfiguration.Builder().setStartPositionMs(t.trimStartMs)
+        if (!loop) clipping.setEndPositionMs(t.trimStartMs + (totalMs - t.offsetMs))
+        val mi = MediaItem.Builder().setUri(t.uri).setClippingConfiguration(clipping.build()).build()
+        audioItems += EditedMediaItem.Builder(mi)
             .setRemoveVideo(true)
-            .setEffects(
-                Effects(
-                    if (musicVolume != 1f) listOf(volumeProcessor(musicVolume)) else emptyList(),
-                    emptyList()
-                )
-            ).build()
-        sequences += EditedMediaItemSequence(listOf(audioItem), true)
+            .setEffects(Effects(if (t.volume != 1f) listOf(volumeProcessor(t.volume)) else emptyList(), emptyList()))
+            .build()
+        sequences += EditedMediaItemSequence(audioItems, loop)
     }
     return Composition.Builder(sequences)
         .experimentalSetForceAudioTrack(true)

@@ -8,7 +8,10 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
+import android.media.MediaRecorder
 import android.net.Uri
+import android.os.Build
+import android.provider.OpenableColumns
 import android.os.Environment
 import android.os.StatFs
 import android.os.SystemClock
@@ -44,6 +47,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 @OptIn(FlowPreview::class)
@@ -66,8 +70,13 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     var fps by mutableStateOf(0)            // 0 = keep original, else max fps
     var bitrateLevel by mutableStateOf(0)   // 0 auto, 1 balanced, 2 high, 3 max
     var safeZone by mutableStateOf(false)
-    var music by mutableStateOf<Uri?>(null); private set
-    var musicVolume by mutableStateOf(1f)
+    var audioTracks by mutableStateOf(listOf<AudioTrack>()); private set
+    var recording by mutableStateOf(false); private set
+    val waves = mutableStateMapOf<String, FloatArray>()
+    private val waveLoading = mutableSetOf<String>()
+    private var recorder: MediaRecorder? = null
+    private var recordFile: File? = null
+    private var recordOffsetMs = 0L
     var export by mutableStateOf<ExportState>(ExportState.Idle)
     var previewBitmap by mutableStateOf<Bitmap?>(null); private set
     var previewAll by mutableStateOf(false); private set
@@ -130,7 +139,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         })
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                ctx.cacheDir.listFiles { f -> f.name.startsWith("export_") }?.forEach { it.delete() }
+                ctx.cacheDir.listFiles { f -> f.name.startsWith("export_") || f.name.startsWith("silence_") }?.forEach { it.delete() }
                 migrateOldProject()
             }
             refreshProjects()
@@ -138,7 +147,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             val target = projects.firstOrNull { it.id == last }?.id ?: projects.firstOrNull()?.id
             if (target == null || !loadInto(target)) { startEmpty("My project"); saveNow() }
             snapshotFlow {
-                listOf<Any?>(clips, music, musicVolume, aspect, quality, fill, fps, bitrateLevel, projectName)
+                listOf<Any?>(clips, audioTracks, aspect, quality, fill, fps, bitrateLevel, projectName)
             }.debounce(600).collect { saveNow() }
         }
     }
@@ -160,8 +169,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val o = JSONObject()
         o.put("name", projectName); o.put("updated", System.currentTimeMillis())
         o.put("clips", JSONArray().apply { clips.forEach { put(it.toJson()) } })
-        o.put("music", music?.toString())
-        o.put("musicVolume", musicVolume.toDouble())
+        o.put("audio", JSONArray().apply { audioTracks.forEach { put(it.toJson()) } })
         o.put("aspect", aspect.name); o.put("quality", quality); o.put("fill", fill)
         o.put("fps", fps); o.put("bitrate", bitrateLevel)
         return o.toString()
@@ -201,7 +209,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun projectThumb(id: String): Bitmap? = BitmapFactory.decodeFile(File(projectsDir, "$id.jpg").path)
 
-    private class Loaded(val o: JSONObject, val clips: List<Clip>, val thumbs: Map<Long, Bitmap>, val dropped: Int, val music: Uri?)
+    private class Loaded(val o: JSONObject, val clips: List<Clip>, val thumbs: Map<Long, Bitmap>, val dropped: Int, val audio: List<AudioTrack>)
 
     private fun canOpen(uri: Uri): Boolean = try {
         ctx.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
@@ -231,9 +239,22 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                 } finally { r.release() }
             }
         }
-        val ms = o.optString("music", "")
-        val m = if (ms.isNotBlank() && ms != "null") Uri.parse(ms).takeIf { canOpen(it) } else null
-        Loaded(o, list, th, dropped, m)
+        val tracks = mutableListOf<AudioTrack>()
+        val aArr = o.optJSONArray("audio")
+        if (aArr != null) {
+            for (i in 0 until aArr.length()) {
+                val t = audioFromJson(aArr.getJSONObject(i))
+                if (canOpen(t.uri)) tracks += t else dropped++
+            }
+        } else {
+            // projects saved by older versions had a single music file
+            val ms = o.optString("music", "")
+            if (ms.isNotBlank() && ms != "null") {
+                val u = Uri.parse(ms)
+                if (canOpen(u)) tracks += AudioTrack(900_000L, u, displayName(u), o.optDouble("musicVolume", 1.0).toFloat(), loop = true)
+            }
+        }
+        Loaded(o, list, th, dropped, tracks)
     }.getOrNull()
 
     private fun resetPlayback() {
@@ -249,11 +270,13 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         thumbs.clear(); thumbs.putAll(l.thumbs)
         undoStack.clear(); redoStack.clear(); undoCount = 0; redoCount = 0
         clips = l.clips
-        nextId = (clips.maxOfOrNull { c -> maxOf(c.id, c.layers.maxOfOrNull { it.id } ?: 0L) } ?: 0L) + 1
+        nextId = maxOf(
+            (clips.maxOfOrNull { c -> maxOf(c.id, c.layers.maxOfOrNull { it.id } ?: 0L) } ?: 0L),
+            l.audio.maxOfOrNull { it.id } ?: 0L
+        ) + 1
         selectedId = clips.firstOrNull()?.id
         selectedLayerId = null
-        music = l.music
-        musicVolume = l.o.optDouble("musicVolume", 1.0).toFloat()
+        audioTracks = l.audio
         aspect = runCatching { Aspect.valueOf(l.o.getString("aspect")) }.getOrDefault(Aspect.Original)
         quality = l.o.optInt("quality", 720); fill = l.o.optBoolean("fill", false)
         fps = l.o.optInt("fps", 0); bitrateLevel = l.o.optInt("bitrate", 0)
@@ -273,7 +296,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         projectId = System.currentTimeMillis().toString()
         projectName = name
         thumbs.clear(); undoStack.clear(); redoStack.clear(); undoCount = 0; redoCount = 0
-        clips = emptyList(); selectedId = null; selectedLayerId = null; music = null
+        clips = emptyList(); selectedId = null; selectedLayerId = null; audioTracks = emptyList()
         prefs.edit().putString("current", projectId).apply()
     }
 
@@ -453,7 +476,140 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         clips = clips.toMutableList().apply { removeAt(i); add(j, c) }
     }
 
-    fun updateMusic(uri: Uri?) { music = uri }
+    // ---------- audio tracks ----------
+    private fun displayName(uri: Uri): String = runCatching {
+        ctx.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+            if (it.moveToFirst()) it.getString(0) else null
+        }
+    }.getOrNull() ?: uri.lastPathSegment ?: "Audio"
+
+    fun addAudio(uri: Uri, name: String? = null, offsetMs: Long = 0L) {
+        if (audioTracks.size >= 4) { toast("Up to 4 audio tracks"); return }
+        val first = audioTracks.isEmpty() && offsetMs == 0L
+        audioTracks = audioTracks + AudioTrack(nextId++, uri, name ?: displayName(uri), loop = first, offsetMs = offsetMs)
+        ensureWaveform(uri)
+    }
+
+    fun updateAudio(id: Long, f: (AudioTrack) -> AudioTrack) {
+        audioTracks = audioTracks.map { if (it.id == id) f(it) else it }
+    }
+
+    fun removeAudio(id: Long) { audioTracks = audioTracks.filter { it.id != id } }
+
+    fun ensureWaveform(uri: Uri) {
+        val key = uri.toString()
+        if (waves.containsKey(key) || !waveLoading.add(key)) return
+        viewModelScope.launch {
+            val w = withContext(Dispatchers.IO) { Waveform.compute(ctx, uri) } ?: FloatArray(0)
+            waves[key] = w
+            waveLoading.remove(key)
+        }
+    }
+
+    // ---------- voice-over ----------
+    fun startVoice(): Boolean {
+        if (recording) return false
+        val c = selected
+        val offset = if (c != null) clips.takeWhile { it.id != c.id }.sumOf { it.outputMs } else 0L
+        val f = File(ctx.filesDir, "voice_${System.currentTimeMillis()}.m4a")
+        return try {
+            val r = if (Build.VERSION.SDK_INT >= 31) MediaRecorder(ctx) else @Suppress("DEPRECATION") MediaRecorder()
+            r.setAudioSource(MediaRecorder.AudioSource.MIC)
+            r.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            r.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+            r.setAudioSamplingRate(44100)
+            r.setAudioEncodingBitRate(128_000)
+            r.setOutputFile(f.absolutePath)
+            r.prepare()
+            r.start()
+            recorder = r; recordFile = f; recordOffsetMs = offset; recording = true
+            if (clips.any { !it.isImage }) playAll()
+            true
+        } catch (e: Exception) {
+            toast("Could not start recording")
+            false
+        }
+    }
+
+    fun stopVoice() {
+        val r = recorder ?: return
+        try { r.stop() } catch (e: Exception) { }
+        r.release()
+        recorder = null; recording = false
+        player.pause()
+        val f = recordFile ?: return
+        if (f.exists() && f.length() > 1000) addAudio(Uri.fromFile(f), "Voiceover", recordOffsetMs) else toast("Recording was too short")
+    }
+
+    // ---------- keyframes, transitions, speed ramps ----------
+    fun addKeyframe(frac: Float) {
+        val c = selected ?: return
+        val t = if (c.isImage) minOf(1f, (c.keyframes.maxOfOrNull { it.t }?.plus(0.25f)) ?: 0f) else frac.coerceIn(0f, 1f)
+        val base = interpKeyframes(c.keyframes.sortedBy { it.t }, t).copy(t = t)
+        update(c.id) { cl -> cl.copy(keyframes = (cl.keyframes.filter { abs(it.t - t) > 0.01f } + base).sortedBy { it.t }) }
+    }
+
+    fun updateKeyframe(index: Int, f: (Keyframe) -> Keyframe) {
+        val c = selected ?: return
+        update(c.id) { cl ->
+            val l = cl.keyframes.toMutableList()
+            if (index in l.indices) l[index] = f(l[index])
+            cl.copy(keyframes = l.sortedBy { it.t })
+        }
+    }
+
+    fun deleteKeyframe(index: Int) {
+        val c = selected ?: return
+        record(true)
+        clips = clips.map { cl -> if (cl.id == c.id) cl.copy(keyframes = cl.keyframes.filterIndexed { i, _ -> i != index }) else cl }
+    }
+
+    fun clearKeyframes() {
+        val c = selected ?: return
+        update(c.id) { it.copy(keyframes = emptyList()) }
+    }
+
+    fun applyKfPreset(kind: Int) {
+        val c = selected ?: return
+        val kfs = when (kind) {
+            0 -> listOf(Keyframe(0f, scale = 0.3f, opacity = 0f), Keyframe(0.18f, scale = 1.12f), Keyframe(0.3f))
+            1 -> listOf(Keyframe(0f, x = -1.3f), Keyframe(0.2f))
+            2 -> listOf(Keyframe(0f, scale = 0.2f, rotation = -90f, opacity = 0f), Keyframe(0.25f))
+            else -> listOf(Keyframe(0f), Keyframe(1f, scale = 1.3f))
+        }
+        update(c.id) { it.copy(keyframes = kfs) }
+    }
+
+    /** Dip-to-black style transition between this clip and the next one. */
+    fun setTransition(ms: Long) {
+        val c = selected ?: return
+        val i = clips.indexOfFirst { it.id == c.id }
+        record(true)
+        clips = clips.mapIndexed { idx, cl ->
+            when (idx) {
+                i -> cl.copy(fadeOutMs = ms)
+                i + 1 -> cl.copy(fadeInMs = ms)
+                else -> cl
+            }
+        }
+    }
+
+    /** Splits the clip in three parts and gives each its own speed. */
+    fun speedRamp(kind: Int) {
+        val c = selected ?: return
+        if (c.isImage || c.trimmedMs < 1500) { toast("This clip is too short for a speed ramp"); return }
+        record(true)
+        val speeds = if (kind == 0) floatArrayOf(1f, 0.35f, 1f) else floatArrayOf(1.8f, 0.4f, 1.8f)
+        val s1 = c.startMs + c.trimmedMs / 3
+        val s2 = c.startMs + 2 * c.trimmedMs / 3
+        val a = c.copy(endMs = s1, speed = speeds[0], fadeOutMs = 0L)
+        val b = c.copy(id = nextId++, startMs = s1, endMs = s2, speed = speeds[1], layers = emptyList(), keyframes = emptyList(), fadeInMs = 0L, fadeOutMs = 0L)
+        val d = c.copy(id = nextId++, startMs = s2, speed = speeds[2], layers = emptyList(), keyframes = emptyList(), fadeInMs = 0L)
+        thumbs[c.id]?.let { thumbs[b.id] = it; thumbs[d.id] = it }
+        val i = clips.indexOfFirst { it.id == c.id }
+        clips = clips.toMutableList().apply { removeAt(i); addAll(i, listOf(a, b, d)) }
+        selectedId = b.id
+    }
 
     // ---------- text & sticker layers ----------
     fun addLayer(text: String, scale: Float, y: Float) {
@@ -484,13 +640,13 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                 .setStartPositionMs(c.startMs).setEndPositionMs(c.endMs).build()
         ).build()
 
-    private fun applyClipSettings(c: Clip) {
+    private fun applyClipSettings(c: Clip, kfFrac: Float = -1f) {
         player.setPlaybackParameters(PlaybackParameters(c.speed))
         player.volume = if (c.muted) 0f else c.volume.coerceAtMost(1f)
-        player.setVideoEffects(buildVideoEffects(c, null, false))
+        player.setVideoEffects(buildVideoEffects(c, null, false, 0, kfFrac))
     }
 
-    fun applyPreview(c: Clip) {
+    fun applyPreview(c: Clip, kfFrac: Float = -1f) {
         if (previewAll) return
         if (c.isImage) {
             pendingSeek = -1L
@@ -509,7 +665,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             player.setMediaItem(clipItem(c))
             player.prepare()
         }
-        applyClipSettings(c)
+        applyClipSettings(c, kfFrac)
         if (pendingSeek >= 0) { player.seekTo(pendingSeek); pendingSeek = -1L }
     }
 
@@ -625,7 +781,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         clips.forEachIndexed { i, c ->
             if (!canOpen(c.uri)) return "Clip ${i + 1} is no longer available. Delete it or add it again."
         }
-        music?.let { if (!canOpen(it)) return "The music file is no longer available. Remove or change it." }
+        audioTracks.forEach { if (!canOpen(it.uri)) return "The audio file “${it.name}” is no longer available. Remove it and add it again." }
         val (w, h) = outputSize()
         val need = (totalMs / 1000.0 * estimateBitrate(w, h) / 8.0 * 2.2).toLong() + 30_000_000L
         val free = StatFs(ctx.cacheDir.path).availableBytes
@@ -647,7 +803,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private fun runExport() {
         val (w, h) = outputSize()
         val layout = if (fill) Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP else Presentation.LAYOUT_SCALE_TO_FIT
-        val comp = buildComposition(clips, Presentation.createForWidthAndHeight(w, h, layout), music, musicVolume, fps)
+        val comp = buildComposition(ctx, clips, Presentation.createForWidthAndHeight(w, h, layout), audioTracks, fps)
         val out = File(ctx.cacheDir, "export_${System.currentTimeMillis()}.mp4")
 
         val builder = Transformer.Builder(ctx)
@@ -723,6 +879,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        runCatching { recorder?.stop() }
+        recorder?.release()
         transformer?.cancel()
         player.release()
     }

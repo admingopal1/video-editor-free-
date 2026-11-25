@@ -13,6 +13,42 @@ enum class Anim(val label: String) {
     None("None"), ZoomIn("Zoom in"), ZoomOut("Zoom out"), PanLeft("Pan ←"), PanRight("Pan →"), Pulse("Pulse")
 }
 
+enum class Ease(val label: String) { Linear("Linear"), Smooth("Smooth") }
+
+/** A transform keyframe. t is 0..1 of the clip's (output) duration. x,y in -1..1 frame units. */
+data class Keyframe(
+    val t: Float,
+    val x: Float = 0f,
+    val y: Float = 0f,
+    val scale: Float = 1f,
+    val rotation: Float = 0f,
+    val opacity: Float = 1f,
+    val ease: Ease = Ease.Smooth
+)
+
+data class AudioTrack(
+    val id: Long,
+    val uri: Uri,
+    val name: String,
+    val volume: Float = 1f,
+    val offsetMs: Long = 0L,
+    val trimStartMs: Long = 0L,
+    val loop: Boolean = false
+)
+
+fun interpKeyframes(kfs: List<Keyframe>, t: Float): Keyframe {
+    if (kfs.isEmpty()) return Keyframe(t)
+    if (t <= kfs.first().t) return kfs.first().copy(t = t)
+    if (t >= kfs.last().t) return kfs.last().copy(t = t)
+    val i = kfs.indexOfLast { it.t <= t }
+    val a = kfs[i]
+    val b = kfs[i + 1]
+    var f = (t - a.t) / (b.t - a.t).coerceAtLeast(0.0001f)
+    if (a.ease == Ease.Smooth) f = f * f * (3f - 2f * f)
+    fun l(x: Float, y: Float) = x + (y - x) * f
+    return Keyframe(t, l(a.x, b.x), l(a.y, b.y), l(a.scale, b.scale), l(a.rotation, b.rotation), l(a.opacity, b.opacity), a.ease)
+}
+
 enum class TextAnim(val label: String) {
     None("None"), Fade("Fade in"), Pop("Pop"), SlideUp("Slide up")
 }
@@ -71,7 +107,8 @@ data class Clip(
     val anim: Anim = Anim.None,
     val fadeInMs: Long = 0L,
     val fadeOutMs: Long = 0L,
-    val layers: List<TextLayer> = emptyList()
+    val layers: List<TextLayer> = emptyList(),
+    val keyframes: List<Keyframe> = emptyList()
 ) {
     val trimmedMs: Long get() = endMs - startMs
     val outputMs: Long get() = (trimmedMs / speed).toLong()
@@ -93,6 +130,15 @@ fun Clip.toJson(): JSONObject = JSONObject().apply {
     put("br", brightness.toDouble()); put("co", contrast.toDouble()); put("sa", saturation.toDouble())
     put("wa", warmth.toDouble()); put("hue", hue.toDouble())
     put("filter", filter.name); put("anim", anim.name); put("fin", fadeInMs); put("fout", fadeOutMs)
+    put("kf", JSONArray().apply {
+        keyframes.forEach { k ->
+            put(JSONObject().apply {
+                put("t", k.t.toDouble()); put("x", k.x.toDouble()); put("y", k.y.toDouble())
+                put("s", k.scale.toDouble()); put("r", k.rotation.toDouble()); put("o", k.opacity.toDouble())
+                put("e", k.ease.name)
+            })
+        }
+    })
     put("layers", JSONArray().apply {
         layers.forEach { l ->
             put(JSONObject().apply {
@@ -119,6 +165,17 @@ fun clipFromJson(o: JSONObject): Clip {
             anim = runCatching { TextAnim.valueOf(l.getString("anim")) }.getOrDefault(TextAnim.None)
         )
     }
+    val kfs = mutableListOf<Keyframe>()
+    val kArr = o.optJSONArray("kf")
+    if (kArr != null) for (i in 0 until kArr.length()) {
+        val k = kArr.getJSONObject(i)
+        kfs += Keyframe(
+            t = k.optDouble("t", 0.0).toFloat(), x = k.optDouble("x", 0.0).toFloat(), y = k.optDouble("y", 0.0).toFloat(),
+            scale = k.optDouble("s", 1.0).toFloat(), rotation = k.optDouble("r", 0.0).toFloat(),
+            opacity = k.optDouble("o", 1.0).toFloat(),
+            ease = runCatching { Ease.valueOf(k.getString("e")) }.getOrDefault(Ease.Smooth)
+        )
+    }
     return Clip(
         id = o.getLong("id"), uri = Uri.parse(o.getString("uri")), durationMs = o.getLong("dur"),
         width = o.getInt("w"), height = o.getInt("h"), startMs = o.getLong("start"), endMs = o.getLong("end"),
@@ -134,6 +191,18 @@ fun clipFromJson(o: JSONObject): Clip {
         hue = o.optDouble("hue", 0.0).toFloat(),
         filter = runCatching { Filter.valueOf(o.getString("filter")) }.getOrDefault(Filter.None),
         anim = runCatching { Anim.valueOf(o.getString("anim")) }.getOrDefault(Anim.None),
-        fadeInMs = o.optLong("fin", 0L), fadeOutMs = o.optLong("fout", 0L), layers = layers
+        fadeInMs = o.optLong("fin", 0L), fadeOutMs = o.optLong("fout", 0L), layers = layers,
+        keyframes = kfs.sortedBy { it.t }
     )
 }
+
+fun AudioTrack.toJson(): JSONObject = JSONObject().apply {
+    put("id", id); put("uri", uri.toString()); put("name", name); put("vol", volume.toDouble())
+    put("off", offsetMs); put("trim", trimStartMs); put("loop", loop)
+}
+
+fun audioFromJson(o: JSONObject): AudioTrack = AudioTrack(
+    id = o.getLong("id"), uri = Uri.parse(o.getString("uri")), name = o.optString("name", "Audio"),
+    volume = o.optDouble("vol", 1.0).toFloat(), offsetMs = o.optLong("off", 0L),
+    trimStartMs = o.optLong("trim", 0L), loop = o.optBoolean("loop", false)
+)

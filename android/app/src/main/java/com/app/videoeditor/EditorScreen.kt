@@ -11,6 +11,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -29,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
@@ -59,7 +61,7 @@ import kotlin.math.abs
 enum class Tool(val title: String) {
     Speed("Speed"), Volume("Volume"), Animate("Animation"), Fade("Fade"), Filters("Filters"),
     Adjust("Adjust"), Crop("Crop"), Transform("Transform"), Text("Text"), Stickers("Stickers"),
-    Canvas("Canvas & export"), Music("Music")
+    Canvas("Canvas & export"), Audio("Audio"), Keyframes("Keyframes"), Transition("Transition")
 }
 
 private val textColors = listOf(
@@ -87,6 +89,7 @@ fun EditorScreen(vm: EditorViewModel) {
     var tool by remember { mutableStateOf<Tool?>(null) }
     var dpPerSec by remember { mutableFloatStateOf(40f) }
     var showProjects by remember { mutableStateOf(false) }
+    var kfSel by remember { mutableIntStateOf(0) }
     val clip = vm.selected
     var pos by remember { mutableLongStateOf(0L) }
     var projPos by remember { mutableLongStateOf(0L) }
@@ -104,11 +107,21 @@ fun EditorScreen(vm: EditorViewModel) {
     LaunchedEffect(vm.export, playing) {
         view.keepScreenOn = vm.export is ExportState.Running || playing
     }
-    LaunchedEffect(clip) {
-        if (clip != null) { delay(120); vm.applyPreview(clip) }
+    val kfKey = if (clip != null && clip.keyframes.isNotEmpty() && !playing) pos / 80 else -1L
+    LaunchedEffect(clip, kfKey) {
+        if (clip != null) {
+            delay(120)
+            val frac = if (clip.keyframes.isNotEmpty() && !playing && !clip.isImage)
+                (pos.toFloat() / clip.trimmedMs.coerceAtLeast(1)).coerceIn(0f, 1f) else -1f
+            vm.applyPreview(clip, frac)
+        }
+    }
+    LaunchedEffect(vm.clips.map { it.uri }, vm.audioTracks.map { it.uri }) {
+        vm.clips.filter { !it.isImage }.forEach { vm.ensureWaveform(it.uri) }
+        vm.audioTracks.forEach { vm.ensureWaveform(it.uri) }
     }
     LaunchedEffect(clip == null) {
-        if (clip == null && tool != null && tool != Tool.Music && tool != Tool.Canvas) tool = null
+        if (clip == null && tool != null && tool != Tool.Audio && tool != Tool.Canvas) tool = null
     }
 
     val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris ->
@@ -118,10 +131,17 @@ fun EditorScreen(vm: EditorViewModel) {
     val pickAudio = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
         if (u != null) {
             runCatching { ctx.contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-            vm.updateMusic(u)
+            vm.addAudio(u)
         }
     }
     val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { vm.startExport() }
+    val micPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) vm.startVoice()
+    }
+    fun recordVoice() {
+        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) vm.startVoice()
+        else micPerm.launch(Manifest.permission.RECORD_AUDIO)
+    }
     fun requestExport() {
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -252,7 +272,7 @@ fun EditorScreen(vm: EditorViewModel) {
                     TextButton(onClick = { tool = null }) { Text("✓ Done") }
                 }
                 Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp)) {
-                    ToolPanel(vm, tool!!, clip) { pickAudio.launch(arrayOf("audio/*")) }
+                    ToolPanel(vm, tool!!, clip, pos, kfSel, { kfSel = it }, { pickAudio.launch(arrayOf("audio/*")) }, { recordVoice() })
                 }
             }
         }
@@ -462,13 +482,21 @@ private fun Timeline(
                         }
                     }
                 }
-                // music track
-                if (vm.music != null) {
+                // audio tracks (waveform lanes)
+                vm.audioTracks.forEach { t ->
+                    val wave = vm.waves[t.uri.toString()]
+                    val x = minOf(t.offsetMs / 1000f * dpPerSec, maxOf(totalDp - 40f, 0f))
+                    val left = maxOf(totalDp - x, 40f)
+                    val len = if (wave != null && wave.isNotEmpty()) (wave.size * 0.1f - t.trimStartMs / 1000f) * dpPerSec else left
+                    val w = maxOf(if (t.loop && t.offsetMs == 0L) left else minOf(len, left), 40f)
                     Box(
-                        Modifier.padding(top = 4.dp).width(maxOf(totalDp, 80f).dp).height(22.dp).clip(RoundedCornerShape(5.dp))
-                            .background(Color(0xFF1F8A4C)).clickable { openTool(Tool.Music) }.padding(horizontal = 6.dp),
+                        Modifier.padding(top = 4.dp).offset(x = x.dp).width(w.dp).height(26.dp).clip(RoundedCornerShape(5.dp))
+                            .background(Color(0xFF1F8A4C)).clickable { openTool(Tool.Audio) },
                         contentAlignment = Alignment.CenterStart
-                    ) { Text("♪ ${vm.music?.lastPathSegment?.takeLast(24) ?: "Music"}", fontSize = 10.sp, maxLines = 1, color = Color.White) }
+                    ) {
+                        WaveBars(wave, t.trimStartMs, t.trimStartMs + (w / dpPerSec * 1000f).toLong(), Color(0x99FFFFFF), Modifier.fillMaxSize())
+                        Text(" ♪ ${t.name.take(22)}", fontSize = 10.sp, maxLines = 1, color = Color.White)
+                    }
                 }
             }
         }
@@ -508,6 +536,9 @@ private fun ClipTile(vm: EditorViewModel, c: Clip, w: Dp, dpPerSec: Float, tick:
             }
     ) {
         vm.thumbs[c.id]?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+        if (!c.isImage && !c.muted) {
+            WaveBars(vm.waves[c.uri.toString()], c.startMs, c.endMs, Color(0xCCFFFFFF), Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(18.dp))
+        }
         Row(
             Modifier.align(Alignment.BottomEnd).background(Color(0x99000000)).padding(horizontal = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(3.dp)
@@ -518,6 +549,9 @@ private fun ClipTile(vm: EditorViewModel, c: Clip, w: Dp, dpPerSec: Float, tick:
             Text(fmt(c.outputMs), style = MaterialTheme.typography.labelSmall, color = Color.White)
         }
         if (sel) {
+            c.keyframes.forEach { k ->
+                Text("◆", fontSize = 10.sp, color = Color(0xFFFFD60A), modifier = Modifier.offset(x = w * k.t - 5.dp, y = 2.dp))
+            }
             // trim handles
             Box(
                 Modifier.align(Alignment.CenterStart).width(16.dp).fillMaxHeight()
@@ -575,7 +609,7 @@ private fun Toolbar(vm: EditorViewModel, clip: Clip?, openTool: (Tool) -> Unit, 
     val vid = has && clip?.isImage == false
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp)) {
         TB("＋", "Media") { addMedia() }
-        TB("🎵", "Music") { openTool(Tool.Music) }
+        TB("🎵", "Audio") { openTool(Tool.Audio) }
         TB("🖼", "Canvas") { openTool(Tool.Canvas) }
         TB("✂", "Split", vid) { tick(); vm.split() }
         TB("⇤", "Trim left", vid) { tick(); vm.trimToPlayhead(true) }
@@ -584,6 +618,8 @@ private fun Toolbar(vm: EditorViewModel, clip: Clip?, openTool: (Tool) -> Unit, 
         TB("🔊", "Volume", vid) { openTool(Tool.Volume) }
         TB("✨", "Animate", has) { openTool(Tool.Animate) }
         TB("🌗", "Fade", has) { openTool(Tool.Fade) }
+        TB("◆", "Keyframes", has) { openTool(Tool.Keyframes) }
+        TB("⇄", "Transition", has) { openTool(Tool.Transition) }
         TB("🎨", "Filters", has) { openTool(Tool.Filters) }
         TB("🎚", "Adjust", has) { openTool(Tool.Adjust) }
         TB("⛶", "Crop", has) { openTool(Tool.Crop) }
@@ -610,9 +646,12 @@ private fun Slide(label: String, value: Float, range: ClosedFloatingPointRange<F
 }
 
 @Composable
-private fun ToolPanel(vm: EditorViewModel, tool: Tool, c: Clip?, pickMusic: () -> Unit) {
+private fun ToolPanel(
+    vm: EditorViewModel, tool: Tool, c: Clip?, pos: Long, kfSel: Int, onKfSel: (Int) -> Unit,
+    pickAudio: () -> Unit, record: () -> Unit
+) {
     if (tool == Tool.Canvas) { CanvasPanel(vm); return }
-    if (tool == Tool.Music) { MusicPanel(vm, pickMusic); return }
+    if (tool == Tool.Audio) { AudioPanel(vm, pickAudio, record); return }
     if (c == null) { Text("Select a clip on the timeline first.", color = Color.Gray); return }
     val id = c.id
 
@@ -627,6 +666,11 @@ private fun ToolPanel(vm: EditorViewModel, tool: Tool, c: Clip?, pickMusic: () -
                 }
             }
             Text("Speed is applied when you export.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+            Text("Speed ramp (splits the clip in 3 parts)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AssistChip(onClick = { vm.speedRamp(0) }, label = { Text("Slow-mo moment") })
+                AssistChip(onClick = { vm.speedRamp(1) }, label = { Text("Hype ramp") })
+            }
         }
         Tool.Volume -> {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -681,6 +725,8 @@ private fun ToolPanel(vm: EditorViewModel, tool: Tool, c: Clip?, pickMusic: () -
             Slide("Zoom", c.zoom, 1f..3f, String.format(Locale.US, "%.2fx", c.zoom)) { v -> vm.update(id) { it.copy(zoom = v) } }
         }
         Tool.Text -> TextPanel(vm, c)
+        Tool.Keyframes -> KeyframePanel(vm, c, pos, kfSel, onKfSel)
+        Tool.Transition -> TransitionPanel(vm, c)
         Tool.Stickers -> {
             Text("Tap a sticker to add it. Edit size, position and timing in the Text tool.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
             stickerList.chunked(8).forEach { row ->
@@ -802,14 +848,123 @@ private fun CanvasPanel(vm: EditorViewModel) {
 }
 
 @Composable
-private fun MusicPanel(vm: EditorViewModel, pickMusic: () -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Button(onClick = pickMusic) { Text(if (vm.music == null) "Add music" else "Change music") }
-        if (vm.music != null) OutlinedButton(onClick = { vm.updateMusic(null) }) { Text("Remove") }
+private fun TransitionPanel(vm: EditorViewModel, c: Clip) {
+    Text(
+        "Transition to the next clip: fades this clip out and the next one in (dip through black).",
+        style = MaterialTheme.typography.bodySmall, color = Color.Gray
+    )
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(0L to "None", 300L to "Quick", 600L to "Medium", 1000L to "Long").forEach { (ms, label) ->
+            FilterChip(selected = c.fadeOutMs == ms, onClick = { vm.setTransition(ms) }, label = { Text(label) })
+        }
     }
-    if (vm.music != null) {
-        Slide("Music volume", vm.musicVolume, 0f..2f, "${(vm.musicVolume * 100).toInt()}%") { vm.musicVolume = it }
-        Text("Music loops to fit the whole video.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+    Text("Needs a clip after this one. Shows in the exported video. Use Fade for custom lengths.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+}
+
+@Composable
+private fun KeyframePanel(vm: EditorViewModel, c: Clip, pos: Long, sel: Int, onSel: (Int) -> Unit) {
+    val frac = if (c.isImage) 0f else (pos.toFloat() / c.trimmedMs.coerceAtLeast(1)).coerceIn(0f, 1f)
+    val secs = c.outputMs / 1000f
+    Text(
+        "Move the playhead, add a keyframe, then change its values. The clip animates between keyframes in the exported video. Scrub the playhead to preview a keyframe.",
+        style = MaterialTheme.typography.bodySmall, color = Color.Gray
+    )
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Button(onClick = { vm.addKeyframe(frac); onSel(c.keyframes.size) }) { Text("◆ Add keyframe") }
+        OutlinedButton(onClick = { vm.clearKeyframes(); onSel(0) }, enabled = c.keyframes.isNotEmpty()) { Text("Clear all") }
+    }
+    Text("Presets", style = MaterialTheme.typography.bodyMedium)
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf("Pop in", "Slide in", "Spin in", "Slow zoom").forEachIndexed { i, n ->
+            AssistChip(onClick = { vm.applyKfPreset(i); onSel(0) }, label = { Text(n) })
+        }
+    }
+    if (c.keyframes.isEmpty()) return
+    val idx = sel.coerceIn(0, c.keyframes.lastIndex)
+    val k = c.keyframes[idx]
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        c.keyframes.forEachIndexed { i, kf ->
+            FilterChip(
+                selected = i == idx,
+                onClick = { onSel(i); if (!c.isImage) vm.scrubTo(c, (kf.t * c.trimmedMs).toLong()) },
+                label = { Text("◆ " + String.format(Locale.US, "%.1fs", kf.t * secs)) }
+            )
+        }
+    }
+    Slide("Time", k.t, 0f..1f, String.format(Locale.US, "%.1fs", k.t * secs)) { v -> vm.updateKeyframe(idx) { it.copy(t = v) } }
+    Slide("Position X", k.x, -1.5f..1.5f, f2(k.x)) { v -> vm.updateKeyframe(idx) { it.copy(x = v) } }
+    Slide("Position Y", k.y, -1.5f..1.5f, f2(k.y)) { v -> vm.updateKeyframe(idx) { it.copy(y = v) } }
+    Slide("Scale", k.scale, 0.1f..3f, String.format(Locale.US, "%.2fx", k.scale)) { v -> vm.updateKeyframe(idx) { it.copy(scale = v) } }
+    Slide("Rotation", k.rotation, -180f..180f, "${k.rotation.toInt()}°") { v -> vm.updateKeyframe(idx) { it.copy(rotation = v) } }
+    Slide("Opacity", k.opacity, 0f..1f, "${(k.opacity * 100).toInt()}%") { v -> vm.updateKeyframe(idx) { it.copy(opacity = v) } }
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Ease.values().forEach { e ->
+            FilterChip(selected = k.ease == e, onClick = { vm.updateKeyframe(idx) { it.copy(ease = e) } }, label = { Text(e.label) })
+        }
+        OutlinedButton(onClick = { vm.deleteKeyframe(idx); onSel(0) }) { Text("🗑 Delete keyframe") }
+    }
+}
+
+@Composable
+private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () -> Unit) {
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Button(onClick = pickAudio) { Text("＋ Music / sound") }
+        Button(
+            onClick = { if (vm.recording) vm.stopVoice() else record() },
+            colors = ButtonDefaults.buttonColors(containerColor = if (vm.recording) Color(0xFFB3261E) else MaterialTheme.colorScheme.primary)
+        ) { Text(if (vm.recording) "⏹ Stop recording" else "🎙 Record voice") }
+    }
+    Text(
+        "Voice recording starts from the selected clip and plays your video. Use headphones to avoid echo. Up to 4 audio tracks.",
+        style = MaterialTheme.typography.bodySmall, color = Color.Gray
+    )
+    val total = (vm.totalMs / 1000f).coerceAtLeast(1f)
+    vm.audioTracks.forEach { t ->
+        val dur = (vm.waves[t.uri.toString()]?.size ?: 0) * 0.1f
+        Column(
+            Modifier.fillMaxWidth().padding(vertical = 6.dp).background(Color(0x14FFFFFF), RoundedCornerShape(10.dp)).padding(10.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("♪ ${t.name}", Modifier.weight(1f), maxLines = 1)
+                TextButton(onClick = { vm.removeAudio(t.id) }) { Text("Remove") }
+            }
+            Slide("Volume", t.volume, 0f..2f, "${(t.volume * 100).toInt()}%") { v -> vm.updateAudio(t.id) { it.copy(volume = v) } }
+            Slide("Starts at", t.offsetMs / 1000f, 0f..total, String.format(Locale.US, "%.1fs", t.offsetMs / 1000f)) { v ->
+                vm.updateAudio(t.id) { it.copy(offsetMs = (v * 10).toLong() * 100L) }
+            }
+            if (dur > 2f) {
+                Slide("Skip first", t.trimStartMs / 1000f, 0f..(dur - 1f), String.format(Locale.US, "%.1fs", t.trimStartMs / 1000f)) { v ->
+                    vm.updateAudio(t.id) { it.copy(trimStartMs = (v * 10).toLong() * 100L) }
+                }
+            }
+            if (t.offsetMs == 0L) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Loop to fill the video", Modifier.weight(1f))
+                    Switch(checked = t.loop, onCheckedChange = { l -> vm.updateAudio(t.id) { it.copy(loop = l) } })
+                }
+            }
+        }
+    }
+    if (vm.audioTracks.isEmpty()) {
+        Text("No audio yet. Add music or record your voice.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+    }
+}
+
+/** Draws audio loudness bars for the part of the file between startMs and endMs. */
+@Composable
+private fun WaveBars(peaks: FloatArray?, startMs: Long, endMs: Long, color: Color, modifier: Modifier) {
+    if (peaks == null || peaks.isEmpty()) return
+    Canvas(modifier) {
+        val s = (startMs / 100).toInt().coerceIn(0, peaks.size - 1)
+        val e = (endMs / 100).toInt().coerceIn(s + 1, peaks.size)
+        val n = (size.width / 3f).toInt().coerceAtLeast(1)
+        val step = size.width / n
+        for (i in 0 until n) {
+            val idx = (s + ((i.toFloat() / n) * (e - s)).toInt()).coerceIn(0, peaks.size - 1)
+            val h = (peaks[idx] * size.height).coerceAtLeast(1.5f)
+            val x = i * step
+            drawLine(color, Offset(x, (size.height - h) / 2f), Offset(x, (size.height + h) / 2f), strokeWidth = 2f)
+        }
     }
 }
 
