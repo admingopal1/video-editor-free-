@@ -67,21 +67,10 @@ private fun animEffect(c: Clip): Effect? {
     val tb = TimeBase()
     return object : MatrixTransformation {
         override fun getMatrix(presentationTimeUs: Long): Matrix {
-            val r = tb.rel(presentationTimeUs)
-            val f = (r.toFloat() / total).coerceIn(0f, 1f)
+            val xf = Motion.anim(c.anim, tb.rel(presentationTimeUs), total)
             val m = Matrix()
-            when (c.anim) {
-                Anim.ZoomIn -> { val s = 1f + 0.25f * f; m.postScale(s, s) }
-                Anim.ZoomOut -> { val s = 1.25f - 0.25f * f; m.postScale(s, s) }
-                Anim.PanLeft -> { m.postScale(1.2f, 1.2f); m.postTranslate(0.18f * (1f - 2f * f), 0f) }
-                Anim.PanRight -> { m.postScale(1.2f, 1.2f); m.postTranslate(-0.18f * (1f - 2f * f), 0f) }
-                Anim.Pulse -> {
-                    val sec = r / 1_000_000f
-                    val s = 1f + 0.05f * sin(2.0 * PI * sec).toFloat()
-                    m.postScale(s, s)
-                }
-                Anim.None -> {}
-            }
+            m.postScale(xf.scale, xf.scale)
+            m.postTranslate(xf.dx, 0f)
             return m
         }
     }
@@ -97,15 +86,8 @@ private fun diagMatrix(o: Float): FloatArray {
     )
 }
 
-private fun frameAspect(c: Clip): Float {
-    var w = c.width * (1f - c.cropL - c.cropR)
-    var h = c.height * (1f - c.cropT - c.cropB)
-    if (c.rotation == 90 || c.rotation == 270) { val t = w; w = h; h = t }
-    return (w / h.coerceAtLeast(1f)).coerceIn(0.2f, 5f)
-}
-
 private fun kfMatrix(c: Clip, k: Keyframe): Matrix {
-    val a = frameAspect(c)
+    val a = c.frameAspect()
     val m = Matrix()
     m.postScale(k.scale, k.scale)
     if (k.rotation != 0f) {
@@ -159,19 +141,8 @@ private fun fadeEffect(c: Clip): Effect? {
     val outUs = c.fadeOutMs * 1000L
     val tb = TimeBase()
     return object : RgbMatrix {
-        override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray {
-            val t = tb.rel(presentationTimeUs)
-            var f = 1f
-            if (inUs > 0 && t < inUs) f = t.toFloat() / inUs
-            if (outUs > 0 && t > total - outUs) f = minOf(f, (total - t).toFloat() / outUs)
-            f = f.coerceIn(0f, 1f)
-            return floatArrayOf(
-                f, 0f, 0f, 0f,
-                0f, f, 0f, 0f,
-                0f, 0f, f, 0f,
-                0f, 0f, 0f, 1f
-            )
-        }
+        override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray =
+            diagMatrix(Motion.fade(inUs, outUs, total, tb.rel(presentationTimeUs)))
     }
 }
 
@@ -187,38 +158,20 @@ private fun styledText(t: TextLayer): SpannableString {
     return s
 }
 
-/** Time-aware text overlay shared by preview and export. */
+/** Time-aware text overlay for export. Preview uses the same textRender() maths. */
 private fun timedOverlay(c: Clip, t: TextLayer): TextureOverlay {
     val text = styledText(t)
     val total = (c.outputMs * 1000L).coerceAtLeast(1L)
-    val startFrac = t.startFrac.coerceIn(0f, 1f)
-    val endFrac = t.endFrac.coerceIn(startFrac, 1f)
-    val startUs = (startFrac * total).toLong()
-    val endUs = (endFrac * total).toLong()
-    val animUs = 400_000L
     val tb = TimeBase()
     return object : TextOverlay() {
         override fun getText(presentationTimeUs: Long): SpannableString = text
 
         override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings {
-            val r = tb.rel(presentationTimeUs)
-            val visible = r >= startUs && r <= endUs
-            var alpha = if (visible) 1f else 0f
-            var scale = t.scale
-            var y = t.y
-            if (visible) {
-                val a = ((r - startUs).toFloat() / animUs).coerceIn(0f, 1f)
-                when (t.anim) {
-                    TextAnim.Fade -> alpha = a
-                    TextAnim.Pop -> scale = t.scale * (0.5f + 0.5f * a)
-                    TextAnim.SlideUp -> y = t.y - 0.25f * (1f - a)
-                    TextAnim.None -> {}
-                }
-            }
+            val r = textRender(t, total, tb.rel(presentationTimeUs))
             return OverlaySettings.Builder()
-                .setBackgroundFrameAnchor(t.x, y)
-                .setScale(scale, scale)
-                .setAlphaScale(alpha)
+                .setBackgroundFrameAnchor(t.x, r.y)
+                .setScale(r.scale, r.scale)
+                .setAlphaScale(if (r.visible) r.alpha else 0f)
                 .build()
         }
     }
@@ -239,25 +192,7 @@ private fun textOverlays(c: Clip): List<TextureOverlay> =
         }
     }
 
-/** Visual effects for one clip. Time-based effects (animation, fade) and speed are export-only. */
-fun buildVideoEffects(c: Clip, presentation: Presentation?, forExport: Boolean, fps: Int = 0, kfFrac: Float = -1f): List<Effect> {
-    val l = mutableListOf<Effect>()
-    if (forExport && c.speed != 1f && !c.isImage) l += SpeedChangeEffect(c.speed)
-
-    if (c.cropL > 0f || c.cropR > 0f || c.cropT > 0f || c.cropB > 0f) {
-        l += Crop(-1f + 2f * c.cropL, 1f - 2f * c.cropR, -1f + 2f * c.cropB, 1f - 2f * c.cropT)
-    }
-    if (c.rotation != 0 || c.flipH || c.flipV || c.zoom != 1f) {
-        val sx = if (c.flipH) -c.zoom else c.zoom
-        val sy = if (c.flipV) -c.zoom else c.zoom
-        l += ScaleAndRotateTransformation.Builder()
-            .setRotationDegrees(c.rotation.toFloat())
-            .setScale(sx, sy)
-            .build()
-    }
-    if (forExport) animEffect(c)?.let { l += it }
-    l += kfEffects(c, kfFrac, forExport)
-
+private fun addColorEffects(l: MutableList<Effect>, c: Clip) {
     if (c.brightness != 0f) l += Brightness(c.brightness)
     if (c.contrast != 0f) l += Contrast(c.contrast)
     if (c.saturation != 0f || c.hue != 0f) {
@@ -300,6 +235,41 @@ fun buildVideoEffects(c: Clip, presentation: Presentation?, forExport: Boolean, 
             l += Contrast(0.2f)
         }
     }
+}
+
+/**
+ * GL effects used by the live preview: crop, colour adjustments and filter. Geometry, motion, fades and
+ * text are drawn by Compose from the shared PreviewMath so they follow the timeline clock exactly.
+ */
+fun buildPreviewGlEffects(c: Clip): List<Effect> {
+    val l = mutableListOf<Effect>()
+    if (c.cropL > 0f || c.cropR > 0f || c.cropT > 0f || c.cropB > 0f) {
+        l += Crop(-1f + 2f * c.cropL, 1f - 2f * c.cropR, -1f + 2f * c.cropB, 1f - 2f * c.cropT)
+    }
+    addColorEffects(l, c)
+    return l
+}
+
+/** Visual effects for one clip. Time-based effects (animation, fade) and speed are export-only. */
+fun buildVideoEffects(c: Clip, presentation: Presentation?, forExport: Boolean, fps: Int = 0, kfFrac: Float = -1f): List<Effect> {
+    val l = mutableListOf<Effect>()
+    if (forExport && c.speed != 1f && !c.isImage) l += SpeedChangeEffect(c.speed)
+
+    if (c.cropL > 0f || c.cropR > 0f || c.cropT > 0f || c.cropB > 0f) {
+        l += Crop(-1f + 2f * c.cropL, 1f - 2f * c.cropR, -1f + 2f * c.cropB, 1f - 2f * c.cropT)
+    }
+    if (c.rotation != 0 || c.flipH || c.flipV || c.zoom != 1f) {
+        val sx = if (c.flipH) -c.zoom else c.zoom
+        val sy = if (c.flipV) -c.zoom else c.zoom
+        l += ScaleAndRotateTransformation.Builder()
+            .setRotationDegrees(c.rotation.toFloat())
+            .setScale(sx, sy)
+            .build()
+    }
+    if (forExport) animEffect(c)?.let { l += it }
+    l += kfEffects(c, kfFrac, forExport)
+
+    addColorEffects(l, c)
     if (forExport) fadeEffect(c)?.let { l += it }
     if (forExport && fps > 0) l += FrameDropEffect.createDefaultFrameDropEffect(fps.toFloat())
     if (presentation != null) l += presentation
