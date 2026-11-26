@@ -34,6 +34,11 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -833,12 +838,15 @@ private fun PreviewTextOverlays(c: Clip, localOutMs: Long, canvasW: Dp, canvasH:
                 val family = remember(layer.font, layer.bold) {
                     FontFamily(Typeface.create(FONT_NAMES[layer.font.coerceIn(0, FONT_NAMES.lastIndex)], if (layer.bold) Typeface.BOLD else Typeface.NORMAL))
                 }
-                Text(
-                    text = layer.text,
-                    color = Color(layer.color),
-                    fontSize = with(density) { (72f * r.scale * pxPerOutputPx).toSp() },
-                    fontFamily = family,
-                    modifier = Modifier
+                val sizePx = 72f * r.scale * pxPerOutputPx
+                val align = when (layer.align) { 0 -> TextAlign.Start; 2 -> TextAlign.End; else -> TextAlign.Center }
+                val shadow = if (layer.shadow) Shadow(Color(0xCC000000), Offset(4f * r.scale * pxPerOutputPx, 4f * r.scale * pxPerOutputPx), 8f * r.scale * pxPerOutputPx) else null
+                val base = TextStyle(
+                    color = Color(layer.color), fontFamily = family, textAlign = align, shadow = shadow,
+                    fontSize = with(density) { sizePx.toSp() }
+                )
+                Box(
+                    Modifier
                         .offset(
                             x = canvasW * ((layer.x.coerceIn(-1f, 1f) + 1f) / 2f),
                             y = canvasH * ((1f - r.y.coerceIn(-1f, 1f)) / 2f)
@@ -846,15 +854,26 @@ private fun PreviewTextOverlays(c: Clip, localOutMs: Long, canvasW: Dp, canvasH:
                         .graphicsLayer {
                             translationX = -size.width / 2f
                             translationY = -size.height / 2f
+                            rotationZ = -layer.rotation       // export rotates counter-clockwise
                             alpha = r.alpha
                         }
                         .then(if (layer.background) Modifier.background(Color(0xB3000000)) else Modifier)
-                )
+                ) {
+                    if (layer.outline) {
+                        Text(
+                            text = layer.text,
+                            style = base.copy(
+                                color = Color.Black, shadow = null,
+                                drawStyle = Stroke(width = OUTLINE_PX * r.scale * pxPerOutputPx, join = StrokeJoin.Round)
+                            )
+                        )
+                    }
+                    Text(text = layer.text, style = base)
+                }
             }
         }
     }
 }
-
 
 @Composable
 private fun TextPanel(vm: EditorViewModel, c: Clip) {
@@ -872,11 +891,12 @@ private fun TextPanel(vm: EditorViewModel, c: Clip) {
     val lid = sel.id
     OutlinedTextField(
         value = sel.text, onValueChange = { t -> vm.updateLayer(lid) { it.copy(text = t) } },
-        label = { Text("Text") }, modifier = Modifier.fillMaxWidth(), singleLine = true
+        label = { Text("Text (use Enter for a new line)") }, modifier = Modifier.fillMaxWidth(), maxLines = 3
     )
     Slide("Size", sel.scale, 0.3f..4f, String.format(Locale.US, "%.1fx", sel.scale)) { v -> vm.updateLayer(lid) { it.copy(scale = v) } }
     Slide("Horizontal", sel.x, -0.9f..0.9f, f2(sel.x)) { v -> vm.updateLayer(lid) { it.copy(x = v) } }
     Slide("Vertical (down ↔ up)", sel.y, -0.9f..0.9f, f2(sel.y)) { v -> vm.updateLayer(lid) { it.copy(y = v) } }
+    Slide("Rotation", sel.rotation, -180f..180f, "${sel.rotation.toInt()}°") { v -> vm.updateLayer(lid) { it.copy(rotation = v) } }
 
     val secs = c.outputMs / 1000f
     Text("Timing (export)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
@@ -892,7 +912,7 @@ private fun TextPanel(vm: EditorViewModel, c: Clip) {
             FilterChip(selected = sel.anim == a, onClick = { vm.updateLayer(lid) { it.copy(anim = a) } }, label = { Text(a.label) })
         }
     }
-    Text("Text timing and entry animation are reflected in the preview and export. For photos, the preview shows the current frame at the start of the clip.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+    Text("The preview follows the timeline, so timing and entry animation show while you play or scrub.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
     Spacer(Modifier.height(6.dp))
 
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -908,8 +928,16 @@ private fun TextPanel(vm: EditorViewModel, c: Clip) {
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         FilterChip(selected = sel.bold, onClick = { vm.updateLayer(lid) { it.copy(bold = !it.bold) } }, label = { Text("Bold") })
         FilterChip(selected = sel.background, onClick = { vm.updateLayer(lid) { it.copy(background = !it.background) } }, label = { Text("Box") })
+        FilterChip(selected = sel.shadow, onClick = { vm.updateLayer(lid) { it.copy(shadow = !it.shadow) } }, label = { Text("Shadow") })
+        FilterChip(selected = sel.outline, onClick = { vm.updateLayer(lid) { it.copy(outline = !it.outline) } }, label = { Text("Outline") })
         FONT_LABELS.forEachIndexed { i, n ->
             FilterChip(selected = sel.font == i, onClick = { vm.updateLayer(lid) { it.copy(font = i) } }, label = { Text(n) })
+        }
+    }
+    Text("Alignment (multi-line text)", style = MaterialTheme.typography.bodyMedium)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(0 to "Left", 1 to "Centre", 2 to "Right").forEach { (v, label) ->
+            FilterChip(selected = sel.align == v, onClick = { vm.updateLayer(lid) { it.copy(align = v) } }, label = { Text(label) })
         }
     }
     Spacer(Modifier.height(6.dp))

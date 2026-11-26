@@ -3,10 +3,17 @@
 package com.app.videoeditor
 
 import android.content.Context
+import android.graphics.Canvas
 import android.graphics.Matrix
+import android.graphics.Paint
 import android.graphics.Typeface
 import android.net.Uri
+import android.text.Layout
 import android.text.SpannableString
+import android.text.TextPaint
+import android.text.style.AlignmentSpan
+import android.text.style.CharacterStyle
+import android.text.style.ReplacementSpan
 import android.text.Spanned
 import android.text.style.AbsoluteSizeSpan
 import android.text.style.BackgroundColorSpan
@@ -146,6 +153,32 @@ private fun fadeEffect(c: Clip): Effect? {
     }
 }
 
+/** Soft drop shadow behind the text. */
+private class ShadowSpan : CharacterStyle() {
+    override fun updateDrawState(tp: TextPaint) {
+        tp.setShadowLayer(8f, 4f, 4f, 0xCC000000.toInt())
+    }
+}
+
+/** Draws the text twice: a dark stroke first, then the normal fill on top. */
+private class OutlineSpan(private val strokeColor: Int, private val strokeWidth: Float) : ReplacementSpan() {
+    override fun getSize(paint: Paint, text: CharSequence, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int =
+        Math.ceil((paint.measureText(text, start, end) + strokeWidth).toDouble()).toInt()
+
+    override fun draw(canvas: Canvas, text: CharSequence, start: Int, end: Int, x: Float, top: Int, y: Int, bottom: Int, paint: Paint) {
+        val stroke = Paint(paint)
+        stroke.style = Paint.Style.STROKE
+        stroke.strokeWidth = strokeWidth
+        stroke.strokeJoin = Paint.Join.ROUND
+        stroke.color = strokeColor
+        canvas.drawText(text, start, end, x + strokeWidth / 2f, y.toFloat(), stroke)
+        canvas.drawText(text, start, end, x + strokeWidth / 2f, y.toFloat(), paint)
+    }
+}
+
+/** Stroke width (in text-bitmap pixels) of the outline style; the preview scales it the same way. */
+const val OUTLINE_PX = 8f
+
 private fun styledText(t: TextLayer): SpannableString {
     val s = SpannableString(t.text)
     val n = s.length
@@ -155,6 +188,14 @@ private fun styledText(t: TextLayer): SpannableString {
     s.setSpan(TypefaceSpan(FONT_NAMES[t.font.coerceIn(0, FONT_NAMES.lastIndex)]), 0, n, flag)
     if (t.bold) s.setSpan(StyleSpan(Typeface.BOLD), 0, n, flag)
     if (t.background) s.setSpan(BackgroundColorSpan(0xB3000000.toInt()), 0, n, flag)
+    if (t.shadow) s.setSpan(ShadowSpan(), 0, n, flag)
+    if (t.outline) s.setSpan(OutlineSpan(0xFF000000.toInt(), OUTLINE_PX), 0, n, flag)
+    val alignment = when (t.align) {
+        0 -> Layout.Alignment.ALIGN_NORMAL
+        2 -> Layout.Alignment.ALIGN_OPPOSITE
+        else -> Layout.Alignment.ALIGN_CENTER
+    }
+    s.setSpan(AlignmentSpan.Standard(alignment), 0, n, flag)
     return s
 }
 
@@ -170,6 +211,7 @@ private fun timedOverlay(c: Clip, t: TextLayer): TextureOverlay {
             val r = textRender(t, total, tb.rel(presentationTimeUs))
             return OverlaySettings.Builder()
                 .setBackgroundFrameAnchor(t.x, r.y)
+                .setRotationTheta(t.rotation)
                 .setScale(r.scale, r.scale)
                 .setAlphaScale(if (r.visible) r.alpha else 0f)
                 .build()
@@ -186,6 +228,7 @@ private fun textOverlays(c: Clip): List<TextureOverlay> =
                 styledText(t),
                 OverlaySettings.Builder()
                     .setBackgroundFrameAnchor(t.x, t.y)
+                    .setRotationTheta(t.rotation)
                     .setScale(t.scale, t.scale)
                     .build()
             )
