@@ -855,6 +855,232 @@ private fun PreviewTextOverlays(c: Clip, localOutMs: Long, canvasW: Dp, canvasH:
     }
 }
 
+
+@Composable
+private fun TextPanel(vm: EditorViewModel, c: Clip) {
+    val sel = c.layers.firstOrNull { it.id == vm.selectedLayerId }
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Button(onClick = { vm.addLayer("Your text", 1f, 0.6f) }) { Text("＋ Add text") }
+        c.layers.forEach { l ->
+            FilterChip(selected = l.id == vm.selectedLayerId, onClick = { vm.selectedLayerId = l.id }, label = { Text(l.text.take(10).ifBlank { "…" }) })
+        }
+    }
+    if (sel == null) {
+        Text("Add a text layer, or pick one above to edit.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+        return
+    }
+    val lid = sel.id
+    OutlinedTextField(
+        value = sel.text, onValueChange = { t -> vm.updateLayer(lid) { it.copy(text = t) } },
+        label = { Text("Text") }, modifier = Modifier.fillMaxWidth(), singleLine = true
+    )
+    Slide("Size", sel.scale, 0.3f..4f, String.format(Locale.US, "%.1fx", sel.scale)) { v -> vm.updateLayer(lid) { it.copy(scale = v) } }
+    Slide("Horizontal", sel.x, -0.9f..0.9f, f2(sel.x)) { v -> vm.updateLayer(lid) { it.copy(x = v) } }
+    Slide("Vertical (down ↔ up)", sel.y, -0.9f..0.9f, f2(sel.y)) { v -> vm.updateLayer(lid) { it.copy(y = v) } }
+
+    val secs = c.outputMs / 1000f
+    Text("Timing (export)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+    Slide("Show from", sel.startFrac, 0f..1f, String.format(Locale.US, "%.1fs", sel.startFrac * secs)) { v ->
+        vm.updateLayer(lid) { it.copy(startFrac = minOf(v, it.endFrac - 0.05f).coerceAtLeast(0f)) }
+    }
+    Slide("Show until", sel.endFrac, 0f..1f, String.format(Locale.US, "%.1fs", sel.endFrac * secs)) { v ->
+        vm.updateLayer(lid) { it.copy(endFrac = maxOf(v, it.startFrac + 0.05f).coerceAtMost(1f)) }
+    }
+    Text("Entry animation", style = MaterialTheme.typography.bodyMedium)
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        TextAnim.values().forEach { a ->
+            FilterChip(selected = sel.anim == a, onClick = { vm.updateLayer(lid) { it.copy(anim = a) } }, label = { Text(a.label) })
+        }
+    }
+    Text("Text timing and entry animation are reflected in the preview and export. For photos, the preview shows the current frame at the start of the clip.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+    Spacer(Modifier.height(6.dp))
+
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        textColors.forEach { col ->
+            Box(
+                Modifier.size(30.dp).clip(RoundedCornerShape(15.dp)).background(Color(col))
+                    .border(BorderStroke(if (sel.color == col) 3.dp else 1.dp, if (sel.color == col) MaterialTheme.colorScheme.primary else Color.Gray), RoundedCornerShape(15.dp))
+                    .clickable { vm.updateLayer(lid) { it.copy(color = col) } }
+            )
+        }
+    }
+    Spacer(Modifier.height(6.dp))
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(selected = sel.bold, onClick = { vm.updateLayer(lid) { it.copy(bold = !it.bold) } }, label = { Text("Bold") })
+        FilterChip(selected = sel.background, onClick = { vm.updateLayer(lid) { it.copy(background = !it.background) } }, label = { Text("Box") })
+        FONT_LABELS.forEachIndexed { i, n ->
+            FilterChip(selected = sel.font == i, onClick = { vm.updateLayer(lid) { it.copy(font = i) } }, label = { Text(n) })
+        }
+    }
+    Spacer(Modifier.height(6.dp))
+    OutlinedButton(onClick = { vm.deleteLayer(lid) }) { Text("🗑 Delete layer") }
+}
+
+@Composable
+private fun CanvasPanel(vm: EditorViewModel) {
+    Text("Quick presets", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        AssistChip(onClick = { vm.applyPreset(0) }, label = { Text("Reels / Shorts / TikTok") })
+        AssistChip(onClick = { vm.applyPreset(1) }, label = { Text("YouTube 1080p") })
+        AssistChip(onClick = { vm.applyPreset(2) }, label = { Text("Instagram post") })
+        AssistChip(onClick = { vm.applyPreset(3) }, label = { Text("WhatsApp (small)") })
+    }
+    Text("Aspect ratio", style = MaterialTheme.typography.bodyMedium)
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Aspect.values().forEach { a ->
+            FilterChip(selected = vm.aspect == a, onClick = { vm.changeAspect(a) }, label = { Text(a.label) })
+        }
+    }
+    Text("Resolution (shorter side)", style = MaterialTheme.typography.bodyMedium)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(480, 720, 1080).forEach { q ->
+            FilterChip(selected = vm.quality == q, onClick = { vm.changeQuality(q) }, label = { Text("${q}p") })
+        }
+    }
+    Text("Frame rate limit", style = MaterialTheme.typography.bodyMedium)
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(0 to "Original", 30 to "30 fps", 24 to "24 fps").forEach { (v, label) ->
+            FilterChip(selected = vm.fps == v, onClick = { vm.changeFps(v) }, label = { Text(label) })
+        }
+    }
+    Text("Video quality (bitrate)", style = MaterialTheme.typography.bodyMedium)
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(0 to "Auto", 1 to "Balanced", 2 to "High", 3 to "Max").forEach { (v, label) ->
+            FilterChip(selected = vm.bitrateLevel == v, onClick = { vm.changeBitrateLevel(v) }, label = { Text(label) })
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Fill frame (crop) instead of black bars", Modifier.weight(1f))
+        Switch(checked = vm.fill, onCheckedChange = { vm.changeFill(it) })
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Show safe zones (keep text out of the red areas)", Modifier.weight(1f))
+        Switch(checked = vm.safeZone, onCheckedChange = { vm.safeZone = it })
+    }
+}
+
+@Composable
+private fun TransitionPanel(vm: EditorViewModel, c: Clip) {
+    Text(
+        "Transition to the next clip: fades this clip out and the next one in (dip through black).",
+        style = MaterialTheme.typography.bodySmall, color = Color.Gray
+    )
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(0L to "None", 300L to "Quick", 600L to "Medium", 1000L to "Long").forEach { (ms, label) ->
+            FilterChip(selected = c.fadeOutMs == ms, onClick = { vm.setTransition(ms) }, label = { Text(label) })
+        }
+    }
+    Text("Needs a clip after this one. Shows in the exported video. Use Fade for custom lengths.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+}
+
+@Composable
+private fun KeyframePanel(vm: EditorViewModel, c: Clip, pos: Long, sel: Int, onSel: (Int) -> Unit) {
+    val frac = if (c.isImage) 0f else (pos.toFloat() / c.trimmedMs.coerceAtLeast(1)).coerceIn(0f, 1f)
+    val secs = c.outputMs / 1000f
+    Text(
+        "Move the playhead, add a keyframe, then change its values. The clip animates between keyframes in the exported video. Scrub the playhead to preview a keyframe.",
+        style = MaterialTheme.typography.bodySmall, color = Color.Gray
+    )
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Button(onClick = { vm.addKeyframe(frac); onSel(c.keyframes.size) }) { Text("◆ Add keyframe") }
+        OutlinedButton(onClick = { vm.clearKeyframes(); onSel(0) }, enabled = c.keyframes.isNotEmpty()) { Text("Clear all") }
+    }
+    Text("Presets", style = MaterialTheme.typography.bodyMedium)
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf("Pop in", "Slide in", "Spin in", "Slow zoom").forEachIndexed { i, n ->
+            AssistChip(onClick = { vm.applyKfPreset(i); onSel(0) }, label = { Text(n) })
+        }
+    }
+    if (c.keyframes.isEmpty()) return
+    val idx = sel.coerceIn(0, c.keyframes.lastIndex)
+    val k = c.keyframes[idx]
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        c.keyframes.forEachIndexed { i, kf ->
+            FilterChip(
+                selected = i == idx,
+                onClick = { onSel(i); if (!c.isImage) vm.scrubTo(c, (kf.t * c.trimmedMs).toLong()) },
+                label = { Text("◆ " + String.format(Locale.US, "%.1fs", kf.t * secs)) }
+            )
+        }
+    }
+    Slide("Time", k.t, 0f..1f, String.format(Locale.US, "%.1fs", k.t * secs)) { v -> vm.updateKeyframe(idx) { it.copy(t = v) } }
+    Slide("Position X", k.x, -1.5f..1.5f, f2(k.x)) { v -> vm.updateKeyframe(idx) { it.copy(x = v) } }
+    Slide("Position Y", k.y, -1.5f..1.5f, f2(k.y)) { v -> vm.updateKeyframe(idx) { it.copy(y = v) } }
+    Slide("Scale", k.scale, 0.1f..3f, String.format(Locale.US, "%.2fx", k.scale)) { v -> vm.updateKeyframe(idx) { it.copy(scale = v) } }
+    Slide("Rotation", k.rotation, -180f..180f, "${k.rotation.toInt()}°") { v -> vm.updateKeyframe(idx) { it.copy(rotation = v) } }
+    Slide("Opacity", k.opacity, 0f..1f, "${(k.opacity * 100).toInt()}%") { v -> vm.updateKeyframe(idx) { it.copy(opacity = v) } }
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Ease.values().forEach { e ->
+            FilterChip(selected = k.ease == e, onClick = { vm.updateKeyframe(idx) { it.copy(ease = e) } }, label = { Text(e.label) })
+        }
+        OutlinedButton(onClick = { vm.deleteKeyframe(idx); onSel(0) }) { Text("🗑 Delete keyframe") }
+    }
+}
+
+@Composable
+private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () -> Unit) {
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Button(onClick = pickAudio) { Text("＋ Music / sound") }
+        Button(
+            onClick = { if (vm.recording) vm.stopVoice() else record() },
+            colors = ButtonDefaults.buttonColors(containerColor = if (vm.recording) Color(0xFFB3261E) else MaterialTheme.colorScheme.primary)
+        ) { Text(if (vm.recording) "⏹ Stop recording" else "🎙 Record voice") }
+    }
+    Text(
+        "Voice recording starts from the selected clip and plays your video. Use headphones to avoid echo. Up to 4 audio tracks.",
+        style = MaterialTheme.typography.bodySmall, color = Color.Gray
+    )
+    val total = (vm.totalMs / 1000f).coerceAtLeast(1f)
+    vm.audioTracks.forEach { t ->
+        val dur = (vm.waves[t.uri.toString()]?.size ?: 0) * 0.1f
+        Column(
+            Modifier.fillMaxWidth().padding(vertical = 6.dp).background(Color(0x14FFFFFF), RoundedCornerShape(10.dp)).padding(10.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("♪ ${t.name}", Modifier.weight(1f), maxLines = 1)
+                TextButton(onClick = { vm.removeAudio(t.id) }) { Text("Remove") }
+            }
+            Slide("Volume", t.volume, 0f..2f, "${(t.volume * 100).toInt()}%") { v -> vm.updateAudio(t.id) { it.copy(volume = v) } }
+            Slide("Starts at", t.offsetMs / 1000f, 0f..total, String.format(Locale.US, "%.1fs", t.offsetMs / 1000f)) { v ->
+                vm.updateAudio(t.id) { it.copy(offsetMs = (v * 10).toLong() * 100L) }
+            }
+            if (dur > 2f) {
+                Slide("Skip first", t.trimStartMs / 1000f, 0f..(dur - 1f), String.format(Locale.US, "%.1fs", t.trimStartMs / 1000f)) { v ->
+                    vm.updateAudio(t.id) { it.copy(trimStartMs = (v * 10).toLong() * 100L) }
+                }
+            }
+            if (t.offsetMs == 0L) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Loop to fill the video", Modifier.weight(1f))
+                    Switch(checked = t.loop, onCheckedChange = { l -> vm.updateAudio(t.id) { it.copy(loop = l) } })
+                }
+            }
+        }
+    }
+    if (vm.audioTracks.isEmpty()) {
+        Text("No audio yet. Add music or record your voice.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+    }
+}
+
+/** Draws audio loudness bars for the part of the file between startMs and endMs. */
+@Composable
+private fun WaveBars(peaks: FloatArray?, startMs: Long, endMs: Long, color: Color, modifier: Modifier) {
+    if (peaks == null || peaks.isEmpty()) return
+    Canvas(modifier) {
+        val s = (startMs / 100).toInt().coerceIn(0, peaks.size - 1)
+        val e = (endMs / 100).toInt().coerceIn(s + 1, peaks.size)
+        val n = (size.width / 3f).toInt().coerceAtLeast(1)
+        val step = size.width / n
+        for (i in 0 until n) {
+            val idx = (s + ((i.toFloat() / n) * (e - s)).toInt()).coerceIn(0, peaks.size - 1)
+            val h = (peaks[idx] * size.height).coerceAtLeast(1.5f)
+            val x = i * step
+            drawLine(color, Offset(x, (size.height - h) / 2f), Offset(x, (size.height + h) / 2f), strokeWidth = 2f)
+        }
+    }
+}
+
+/** Compose-side photo colour preview. Export uses Media3's equivalent effect chain. */
 private fun imageFilter(c: Clip): ColorFilter {
     fun identity() = floatArrayOf(
         1f, 0f, 0f, 0f, 0f,

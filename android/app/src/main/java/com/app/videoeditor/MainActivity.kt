@@ -33,6 +33,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        vm.player.pause()
+        vm.pausePreview()
     }
 }
