@@ -718,6 +718,8 @@ private fun PreviewStage(vm: EditorViewModel, modifier: Modifier, onAdd: () -> U
             ClipFrame(clipB, videoCurrent && !tl.activeIsA && current?.id == clipB?.id, canvasW, canvasH, vm.fill, localOutMs) { mod ->
                 AndroidView(factory = { viewB }, modifier = mod)
             }
+            // Opaque cover: hides the standby player (which keeps the next clip prepared) under the active layer.
+            Box(Modifier.size(canvasW, canvasH).zIndex(1.5f).background(Color.Black))
             val bmp = tl.photo
             if (current != null && current.isImage && bmp != null) {
                 val cropped = remember(bmp, current.cropL, current.cropR, current.cropT, current.cropB) {
@@ -764,7 +766,7 @@ private fun PreviewStage(vm: EditorViewModel, modifier: Modifier, onAdd: () -> U
 
 /**
  * Places one clip (video view or photo) in the canvas exactly like the exporter: crop, then rotate/flip/zoom,
- * then clip motion and keyframes, then fit/fill into the canvas. Inactive layers stay almost invisible but
+ * then clip motion and keyframes, then fit/fill into the canvas. Inactive layers sit underneath an opaque cover but stay
  * attached, so their prepared frame is ready for the next clip.
  */
 @Composable
@@ -780,8 +782,7 @@ private fun ClipFrame(
     val fh = frame.second.dp
 
     Box(
-        Modifier.size(canvasW, canvasH).zIndex(if (c == null) 1f else if (topLayer) 3f else 2f)
-            .graphicsLayer { alpha = if (c == null) 0.02f else 1f },
+        Modifier.size(canvasW, canvasH).zIndex(if (c == null) 1f else if (topLayer) 3f else 2f),
         contentAlignment = Alignment.Center
     ) {
         Box(Modifier.size(fw, fh).clipToBounds(), contentAlignment = Alignment.Center) {
