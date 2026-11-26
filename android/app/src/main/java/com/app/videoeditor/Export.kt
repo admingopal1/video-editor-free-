@@ -211,7 +211,7 @@ private fun timedOverlay(c: Clip, t: TextLayer): TextureOverlay {
             val r = textRender(t, total, tb.rel(presentationTimeUs))
             return OverlaySettings.Builder()
                 .setBackgroundFrameAnchor(t.x, r.y)
-                .setRotationTheta(t.rotation)
+                .setRotationDegrees(t.rotation)
                 .setScale(r.scale, r.scale)
                 .setAlphaScale(if (r.visible) r.alpha else 0f)
                 .build()
@@ -228,7 +228,7 @@ private fun textOverlays(c: Clip): List<TextureOverlay> =
                 styledText(t),
                 OverlaySettings.Builder()
                     .setBackgroundFrameAnchor(t.x, t.y)
-                    .setRotationTheta(t.rotation)
+                    .setRotationDegrees(t.rotation)
                     .setScale(t.scale, t.scale)
                     .build()
             )
