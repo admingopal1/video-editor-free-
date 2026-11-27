@@ -26,6 +26,8 @@ data class Keyframe(
     val ease: Ease = Ease.Smooth
 )
 
+data class AudioGainPoint(val timeMs: Long, val gain: Float)
+
 data class AudioTrack(
     val id: Long,
     val uri: Uri,
@@ -37,7 +39,8 @@ data class AudioTrack(
     /** Source-media end in milliseconds; Long.MAX_VALUE preserves legacy full-source behavior. */
     val trimEndMs: Long = Long.MAX_VALUE,
     val fadeInMs: Long = 0L,
-    val fadeOutMs: Long = 0L
+    val fadeOutMs: Long = 0L,
+    val gainPoints: List<AudioGainPoint> = emptyList()
 )
 
 fun trimmedDurationMs(startMs: Long, endMs: Long): Long = (endMs - startMs).coerceAtLeast(0L)
@@ -52,6 +55,19 @@ fun audioFadeGainAt(elapsedMs: Long, durationMs: Long, fadeInMs: Long, fadeOutMs
     val remaining = durationMs - position
     val fadeOutGain = if (fadeOutMs > 0L) (remaining.toFloat() / fadeOutMs).coerceIn(0f, 1f) else 1f
     return minOf(fadeInGain, fadeOutGain)
+}
+
+fun audioKeyframeGainAt(points: List<AudioGainPoint>, elapsedMs: Long): Float {
+    val sorted = points.sortedBy { it.timeMs }
+    if (sorted.isEmpty()) return 1f
+    if (elapsedMs <= sorted.first().timeMs) return sorted.first().gain.coerceIn(0f, 2f)
+    if (elapsedMs >= sorted.last().timeMs) return sorted.last().gain.coerceIn(0f, 2f)
+    val i = sorted.indexOfLast { it.timeMs <= elapsedMs }
+    val a = sorted[i]
+    val b = sorted[i + 1]
+    val span = (b.timeMs - a.timeMs).coerceAtLeast(1L)
+    val fraction = (elapsedMs - a.timeMs).toFloat() / span
+    return (a.gain + (b.gain - a.gain) * fraction).coerceIn(0f, 2f)
 }
 
 fun shouldDeleteStaleExportFile(fileName: String, lastModifiedMs: Long, cutoffMs: Long): Boolean =
@@ -232,7 +248,7 @@ fun clipFromJson(o: JSONObject): Clip {
 
 fun AudioTrack.toJson(): JSONObject = JSONObject().apply {
     put("id", id); put("uri", uri.toString()); put("name", name); put("vol", volume.toDouble())
-    put("off", offsetMs); put("trim", trimStartMs); put("trimEnd", trimEndMs); put("loop", loop); put("fadeIn", fadeInMs); put("fadeOut", fadeOutMs)
+    put("off", offsetMs); put("trim", trimStartMs); put("trimEnd", trimEndMs); put("loop", loop); put("fadeIn", fadeInMs); put("fadeOut", fadeOutMs); put("gainPoints", JSONArray().apply { gainPoints.forEach { put(JSONObject().put("time", it.timeMs).put("gain", it.gain.toDouble())) } })
 }
 
 fun audioFromJson(o: JSONObject): AudioTrack = AudioTrack(
@@ -241,5 +257,6 @@ fun audioFromJson(o: JSONObject): AudioTrack = AudioTrack(
     trimStartMs = o.optLong("trim", 0L), loop = o.optBoolean("loop", false),
     trimEndMs = normalizedAudioTrimEndMs(if (o.has("trimEnd")) o.optLong("trimEnd") else null, o.optLong("trim", 0L)),
     fadeInMs = o.optLong("fadeIn", 0L).coerceAtLeast(0L),
-    fadeOutMs = o.optLong("fadeOut", 0L).coerceAtLeast(0L)
+    fadeOutMs = o.optLong("fadeOut", 0L).coerceAtLeast(0L),
+    gainPoints = (o.optJSONArray("gainPoints")?.let { a -> (0 until a.length()).mapNotNull { i -> a.optJSONObject(i)?.let { AudioGainPoint(it.optLong("time", 0L).coerceAtLeast(0L), it.optDouble("gain", 1.0).toFloat().coerceIn(0f, 2f)) } } } ?: emptyList())
 )
