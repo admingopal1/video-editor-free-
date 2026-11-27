@@ -92,8 +92,10 @@ class PipVideoCompositionPlanTest {
 
         assertTrue(!isPipVideoInputVisible(input, 1_999_999L))
         assertTrue(isPipVideoInputVisible(input, 2_000_000L))
-        assertTrue(isPipVideoInputVisible(input, 3_999_999L))
-        assertTrue(!isPipVideoInputVisible(input, 4_000_000L))
+        // The source trim is 4 seconds long (5_000 - 1_000 ms), so
+        // at 1x speed the PIP interval ends at 6_000 ms on the project timeline.
+        assertTrue(isPipVideoInputVisible(input, 5_999_999L))
+        assertTrue(!isPipVideoInputVisible(input, 6_000_000L))
         assertTrue(!isPipVideoInputVisible(input, -1L))
     }
 
