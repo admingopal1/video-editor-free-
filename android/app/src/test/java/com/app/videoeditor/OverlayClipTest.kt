@@ -1,6 +1,5 @@
 package com.app.videoeditor
 
-import android.net.Uri
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -12,7 +11,7 @@ import org.junit.Test
 class OverlayClipTest {
     private fun sample() = OverlayClip(
         id = 42L,
-        uri = Uri.parse("content://media/external/video/media/7"),
+        uriString = "content://media/external/video/media/7",
         name = "PIP layer",
         durationMs = 12_000L,
         width = 1920,
