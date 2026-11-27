@@ -40,7 +40,7 @@ class OverlaySnapTest {
     fun choosesNearestCandidateAndBreaksTiesTowardEarlierPosition() {
         assertEquals(
             OverlaySnapResult(1_000L, 1_000L),
-            snapOverlayTimelineStart(1_500L, 500L, 10_000L, listOf(1_000L, 2_000L), 500L)
+            snapOverlayTimelineStart(1_500L, 500L, 10_000L, listOf(1_000L, 2_500L), 500L)
         )
     }
 
