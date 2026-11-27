@@ -630,7 +630,9 @@ private fun Timeline(
                                                             requestedStartMs = requestedStart,
                                                             durationMs = it.outputMs,
                                                             totalDurationMs = totalDurationMs,
-                                                            boundariesMs = boundaries
+                                                            boundariesMs = boundaries,
+                                                            thresholdMs = ((8f / dpPerSec.coerceAtLeast(1f)) * 1_000f)
+                                                                .toLong().coerceIn(60L, 500L)
                                                         )
                                                         it.copy(timelineStartMs = snapped.positionMs)
                                                     }
