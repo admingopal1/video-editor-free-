@@ -11,27 +11,29 @@ Status: investigation complete; implementation intentionally guarded.
 
 ## Verified Media3 1.4.1 constraints
 
-The app currently uses Media3 1.4.1.
+The app currently uses Media3 1.4.1. The official Media3 compositor guide demonstrates that the first sequence (input 0) can be positioned as the overlay and the second sequence as the background. Therefore the earlier assumption that the first registered input is necessarily drawn over later inputs is not supported; do not rely on that claim.
 
-1. `EditedMediaItemSequence` concatenates items; items inside one sequence do not overlap. In 1.4.1 it has no video gap insertion API.
-2. `Composition.Builder` accepts multiple sequences and a `VideoCompositorSettings`.
-3. The Media3 default compositor has a critical ordering trade-off: the first registered input is the primary stream (it determines output timestamps and dimensions), and registered inputs are composited in reverse registration order, with the first registered source on top.
-4. Therefore, registering the primary timeline first gives it the correct output clock but also places it above later PIP inputs in the default compositor. Registering PIP first changes the primary clock/dimensions to a PIP source. A custom `VideoCompositorSettings` controls per-input geometry/alpha, but does not by itself change the default compositor's registration-order stacking rule.
-5. The public Media3 layout guide demonstrates multi-input PIP layouts with `VideoCompositorSettings`; it does not remove the need to verify primary-stream ordering, gaps, and inactive input behavior for this editor's timeline.
-6. Upgrading Media3 alone is not a fix for these constraints. Do not remove the current export guard based on a dependency bump.
+Verified API facts:
 
-Reference documentation:
-- https://developer.android.com/reference/androidx/media3/effect/DefaultVideoCompositor
-- https://developer.android.com/reference/androidx/media3/common/VideoCompositorSettings
+1. `VideoCompositorSettings` exposes output-size selection and per-input `OverlaySettings`, including position, scale, rotation, and alpha.
+2. The official guide's example uses input 0 as the foreground PIP and the other input as the background. This demonstrates controllable per-input geometry, but does not itself establish how to select a primary timeline clock when inputs have different start times and durations.
+3. The composition API accepts multiple `EditedMediaItemSequence` instances and custom `VideoCompositorSettings`.
+4. The app's Media3 1.4.1 `EditedMediaItemSequence` API has no video-gap insertion method. A PIP sequence that starts later than the main timeline therefore needs a verified way to represent its inactive interval without rendering a black/transparent frame over the main image.
+5. `VideoCompositorSettings` controls input layout; it does not by itself create missing frames, align independent source clocks to the editor's project clock, or mix independently offset audio.
+6. Do not assume a dependency upgrade alone solves these timeline and audio requirements. Verify the exact API/version and output behavior with a short instrumented export before removing the preflight guard.
+
+Official references:
 - https://developer.android.com/media/media3/transformer/videocompositorsettings
-- https://developer.android.com/reference/androidx/media3/transformer/Composition
+- https://developer.android.com/reference/androidx/media3/common/VideoCompositorSettings
+- https://developer.android.com/reference/androidx/media3/transformer/Composition.Builder
+- https://developer.android.com/reference/androidx/media3/effect/VideoCompositor
 
 ## Required export architecture
 
-Implement a dedicated video-layer compositor/export path (or a verified compositor implementation with equivalent control) that:
+Implement a dedicated video-layer compositor/export path (or a verified Media3 composition path with equivalent control) that:
 
-- Uses the existing primary timeline output as the base layer and the authoritative output clock.
-- Decodes each active PIP video layer independently and composites it above the base frame.
+- Uses the existing primary timeline output as the authoritative project clock and base layer.
+- Decodes each active PIP video layer independently and composites it above the base frame only while active.
 - Applies each layer's `timelineStartMs`, source `startMs/endMs`, `speed`, `x/y`, `scale`, `rotation`, `opacity`, and `layerOrder`.
 - Keeps timeline time and source-media time separate. For a layer at project time `t`, source time is derived from the layer's own start and playback speed only while the layer is active.
 - Supports multiple simultaneous PIP videos without one layer replacing another.
