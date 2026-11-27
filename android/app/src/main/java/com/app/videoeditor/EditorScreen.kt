@@ -1436,7 +1436,7 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
                     val pointTime = (vm.timeline.timeMs - t.offsetMs).coerceAtLeast(0L)
                     vm.updateAudio(t.id) { track ->
                         val point = AudioGainPoint(pointTime, track.volume.coerceIn(0f, 2f))
-                        track.copy(gainPoints = (track.gainPoints.filter { kotlin.math.abs(it.timeMs - pointTime) > 50L } + point).sortedBy { it.timeMs })
+                        track.copy(gainPoints = (track.gainPoints.filter { kotlin.math.abs(it.timeMs - pointTime) > 50L } + point).sortedBy { it.timeMs }, loop = false)
                     }
                 }) { Text("＋ Add point here") }
             }
@@ -1457,8 +1457,8 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
             Slide("Fade out", t.fadeOutMs / 1000f, 0f..fadeMaxSeconds, String.format(Locale.US, "%.1fs", t.fadeOutMs / 1000f)) { v ->
                 vm.updateAudio(t.id) { it.copy(fadeOutMs = (v * 100f).toLong() * 10L, loop = false) }
             }
-            if (t.loop && (t.fadeInMs > 0L || t.fadeOutMs > 0L)) {
-                Text("Fades use a single audio segment, so looping is disabled when a fade is selected.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            if (t.loop && (t.fadeInMs > 0L || t.fadeOutMs > 0L || t.gainPoints.isNotEmpty())) {
+                Text("Looping is disabled while fades or volume automation are active.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
             }
             if (t.offsetMs == 0L) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
