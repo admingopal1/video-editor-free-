@@ -539,10 +539,23 @@ fun AudioTrack.toJson(): JSONObject = JSONObject().apply {
     put("off", offsetMs); put("trim", trimStartMs); put("trimEnd", trimEndMs); put("loop", loop); put("fadeIn", fadeInMs); put("fadeOut", fadeOutMs); put("gainPoints", JSONArray().apply { gainPoints.forEach { put(JSONObject().put("time", it.timeMs).put("gain", it.gain.toDouble())) } }); put("voiceover", isVoiceover); put("autoDuck", autoDuck); put("noiseGate", noiseGateEnabled); put("noiseGateThreshold", noiseGateThreshold.toDouble()); put("muted", muted); put("solo", solo); put("eqGainsDb", JSONArray().apply { eqGainsDb.forEach { put(it.toDouble()) } })
 }
 
-/** Reject malformed audio metadata before it enters the editable project state. */
-fun AudioTrack.isValidProjectAudioTrack(): Boolean =
+/** Pure metadata validator so recovery rules can be regression-tested on the local JVM. */
+fun isValidProjectAudioTrackMetadata(
+    id: Long,
+    uriString: String,
+    name: String,
+    volume: Float = 1f,
+    offsetMs: Long = 0L,
+    trimStartMs: Long = 0L,
+    trimEndMs: Long = Long.MAX_VALUE,
+    fadeInMs: Long = 0L,
+    fadeOutMs: Long = 0L,
+    noiseGateThreshold: Float = 0.04f,
+    gainPoints: List<AudioGainPoint> = emptyList(),
+    eqGainsDb: List<Float> = List(AudioEqualizerProcessor.BAND_COUNT) { 0f }
+): Boolean =
     id > 0L &&
-        uri.toString().isNotBlank() &&
+        uriString.isNotBlank() &&
         name.isNotBlank() &&
         volume.isFinite() && volume in 0f..2f &&
         offsetMs >= 0L &&
@@ -553,6 +566,22 @@ fun AudioTrack.isValidProjectAudioTrack(): Boolean =
         gainPoints.all { it.timeMs >= 0L && it.gain.isFinite() && it.gain in 0f..2f } &&
         eqGainsDb.size == AudioEqualizerProcessor.BAND_COUNT &&
         eqGainsDb.all { it.isFinite() && it in -12f..12f }
+
+/** Reject malformed audio metadata before it enters the editable project state. */
+fun AudioTrack.isValidProjectAudioTrack(): Boolean = isValidProjectAudioTrackMetadata(
+    id = id,
+    uriString = uri.toString(),
+    name = name,
+    volume = volume,
+    offsetMs = offsetMs,
+    trimStartMs = trimStartMs,
+    trimEndMs = trimEndMs,
+    fadeInMs = fadeInMs,
+    fadeOutMs = fadeOutMs,
+    noiseGateThreshold = noiseGateThreshold,
+    gainPoints = gainPoints,
+    eqGainsDb = eqGainsDb
+)
 
 fun audioFromJson(o: JSONObject): AudioTrack = AudioTrack(
     id = o.getLong("id"), uri = Uri.parse(o.getString("uri")), name = o.optString("name", "Audio"),
