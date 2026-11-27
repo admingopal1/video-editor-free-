@@ -694,6 +694,15 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         if (selectedOverlayId == id) selectedOverlayId = overlayClips.lastOrNull()?.id
     }
 
+    /** Move a selected PIP layer one level: -1 sends it backward, +1 brings it forward. */
+    fun moveOverlayLayer(id: Long, direction: Int) {
+        val reordered = reorderOverlayLayer(overlayClips, id, direction)
+        if (reordered == overlayClips) return
+        record(true)
+        overlayClips = reordered
+        selectedOverlayId = id
+    }
+
     // ---------- clip operations ----------
     fun update(id: Long, f: (Clip) -> Clip) {
         record()
