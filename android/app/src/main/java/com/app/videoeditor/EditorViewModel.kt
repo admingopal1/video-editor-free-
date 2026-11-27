@@ -856,22 +856,25 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val key = uri.toString()
         if (waves.containsKey(key) || !waveLoading.add(key)) return
         viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                val duration = runCatching {
-                    MediaMetadataRetriever().let { retriever ->
-                        try {
-                            retriever.setDataSource(ctx, uri)
-                            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-                        } finally {
-                            retriever.release()
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    val duration = runCatching {
+                        MediaMetadataRetriever().let { retriever ->
+                            try {
+                                retriever.setDataSource(ctx, uri)
+                                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                            } finally {
+                                retriever.release()
+                            }
                         }
-                    }
-                }.getOrDefault(0L).coerceAtLeast(0L)
-                duration to (Waveform.compute(ctx, uri) ?: FloatArray(0))
+                    }.getOrDefault(0L).coerceAtLeast(0L)
+                    duration to (Waveform.compute(ctx, uri) ?: FloatArray(0))
+                }
+                audioSourceDurationsMs[key] = result.first
+                waves[key] = result.second
+            } finally {
+                waveLoading.remove(key)
             }
-            audioSourceDurationsMs[key] = result.first
-            waves[key] = result.second
-            waveLoading.remove(key)
         }
     }
 
