@@ -342,7 +342,7 @@ private fun addColorEffects(l: MutableList<Effect>, c: Clip, context: Context? =
     if (listOf(c.redCurveShadows, c.redCurveMidtones, c.redCurveHighlights, c.greenCurveShadows, c.greenCurveMidtones, c.greenCurveHighlights, c.blueCurveShadows, c.blueCurveMidtones, c.blueCurveHighlights).any { it != 0f }) {
         l += SingleColorLut.createFromCube(rgbCurves.toMedia3ArgbCube())
     }
-    val hslAdjustments = listOf(c.hslRed, c.hslOrange, c.hslYellow, c.hslAqua, c.hslBlue, c.hslPurple, c.hslMagenta)
+    val hslAdjustments = listOf(c.hslRed, c.hslOrange, c.hslYellow, c.hslGreen, c.hslAqua, c.hslBlue, c.hslPurple, c.hslMagenta)
     if (hslAdjustments.any { it != 0f }) {
         l += SingleColorLut.createFromCube(HslMixer(hslAdjustments).toMedia3ArgbCube())
     }
