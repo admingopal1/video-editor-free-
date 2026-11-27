@@ -30,6 +30,24 @@ class OverlayClipTest {
     )
 
     @Test
+    fun projectClipMetadataRejectsCorruptValuesIndividually() {
+        val valid = {
+            isValidProjectClipMetadata(
+                1L, "content://media/1", 10_000L, 1920, 1080,
+                0L, 10_000L, 1f, 1f, 1f, listOf(0f, 0f, 0f)
+            )
+        }
+        assertTrue(valid())
+        assertFalse(isValidProjectClipMetadata(0L, "content://media/1", 10_000L, 1920, 1080, 0L, 10_000L, 1f, 1f, 1f, emptyList()))
+        assertFalse(isValidProjectClipMetadata(1L, " ", 10_000L, 1920, 1080, 0L, 10_000L, 1f, 1f, 1f, emptyList()))
+        assertFalse(isValidProjectClipMetadata(1L, "content://media/1", 10_000L, 0, 1080, 0L, 10_000L, 1f, 1f, 1f, emptyList()))
+        assertFalse(isValidProjectClipMetadata(1L, "content://media/1", 10_000L, 1920, 1080, 0L, 10_001L, 1f, 1f, 1f, emptyList()))
+        assertFalse(isValidProjectClipMetadata(1L, "content://media/1", 10_000L, 1920, 1080, 0L, 10_000L, Float.NaN, 1f, 1f, emptyList()))
+        assertFalse(isValidProjectClipMetadata(1L, "content://media/1", 10_000L, 1920, 1080, 0L, 10_000L, 1f, Float.POSITIVE_INFINITY, 1f, emptyList()))
+        assertFalse(isValidProjectClipMetadata(1L, "content://media/1", 10_000L, 1920, 1080, 0L, 10_000L, 1f, 1f, 1f, listOf(Float.NaN)))
+    }
+
+    @Test
     fun projectDurationIgnoresInvalidSegmentsAndSaturatesOverflow() {
         val segments = listOf(
             Triple(0L, 10_000L, 2.0),
