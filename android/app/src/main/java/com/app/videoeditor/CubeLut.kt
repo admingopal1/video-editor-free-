@@ -50,6 +50,25 @@ class CubeLut private constructor(
         return out
     }
 
+    /**
+     * Converts this LUT to Media3's cube[R][G][B] ARGB_8888 layout.
+     * Sampling the normalized input grid also bakes DOMAIN_MIN/MAX into the table,
+     * so the GPU effect can consume ordinary normalized video RGB values.
+     */
+    fun toMedia3ArgbCube(): Array<Array<IntArray>> =
+        Array(size) { r ->
+            Array(size) { g ->
+                IntArray(size) { b ->
+                    val d = (size - 1).toFloat()
+                    val out = sample(r / d, g / d, b / d)
+                    val red = (out[0].coerceIn(0f, 1f) * 255f).toInt()
+                    val green = (out[1].coerceIn(0f, 1f) * 255f).toInt()
+                    val blue = (out[2].coerceIn(0f, 1f) * 255f).toInt()
+                    (0xFF shl 24) or (red shl 16) or (green shl 8) or blue
+                }
+            }
+        }
+
     companion object {
         const val MIN_SIZE = 2
         const val MAX_SIZE = 64
