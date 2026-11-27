@@ -27,6 +27,20 @@ class ColorGradeTest {
     }
 
     @Test
+    fun colorWheelsAcceptNeutralAndSupportedValues() {
+        assertTrue(isValidColorWheels(0f, 0f, 0f, 0f, 0f, 0f))
+        assertTrue(isValidColorWheels(-1f, 1f, 0.5f, -0.5f, 1f, -1f))
+    }
+
+    @Test
+    fun colorWheelsRejectNonFiniteAndOutOfRangeValues() {
+        assertFalse(isValidColorWheels(Float.NaN, 0f, 0f, 0f, 0f, 0f))
+        assertFalse(isValidColorWheels(0f, Float.POSITIVE_INFINITY, 0f, 0f, 0f, 0f))
+        assertFalse(isValidColorWheels(0f, 0f, -1.01f, 0f, 0f, 0f))
+        assertFalse(isValidColorWheels(0f, 0f, 0f, 0f, 0f, 1.01f))
+    }
+
+    @Test
     fun channelGainsAcceptSupportedRange() {
         assertTrue(isValidColorChannelGain(0.5f, 1f, 1.5f))
     }

@@ -322,6 +322,18 @@ private fun addColorEffects(l: MutableList<Effect>, c: Clip, context: Context? =
     if (c.toneShadows != 0f || c.toneMidtones != 0f || c.toneHighlights != 0f) {
         l += SingleColorLut.createFromCube(ToneCurve(c.toneShadows, c.toneMidtones, c.toneHighlights).toMedia3ArgbCube())
     }
+    if (c.shadowsTemperature != 0f || c.shadowsTint != 0f ||
+        c.midtonesTemperature != 0f || c.midtonesTint != 0f ||
+        c.highlightsTemperature != 0f || c.highlightsTint != 0f
+    ) {
+        l += SingleColorLut.createFromCube(
+            ColorWheels(
+                c.shadowsTemperature, c.shadowsTint,
+                c.midtonesTemperature, c.midtonesTint,
+                c.highlightsTemperature, c.highlightsTint
+            ).toMedia3ArgbCube()
+        )
+    }
     c.lutUri?.let { uriString ->
         try {
             val ctx = context ?: throw IllegalStateException("LUT context is unavailable")

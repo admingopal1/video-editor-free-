@@ -1267,6 +1267,17 @@ private fun ToolPanel(
             Slide("Shadows", c.toneShadows, -0.2f..0.2f, f2(c.toneShadows)) { v -> vm.update(id) { it.copy(toneShadows = v) } }
             Slide("Midtones", c.toneMidtones, -0.2f..0.2f, f2(c.toneMidtones)) { v -> vm.update(id) { it.copy(toneMidtones = v) } }
             Slide("Highlights", c.toneHighlights, -0.2f..0.2f, f2(c.toneHighlights)) { v -> vm.update(id) { it.copy(toneHighlights = v) } }
+            Text("Three-way color wheels", fontWeight = FontWeight.SemiBold)
+            Text("Grade shadows, midtones and highlights independently. Temperature shifts blue ↔ amber; tint shifts green ↔ magenta. GPU grading applies to video clips.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            Text("Shadows", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+            Slide("Shadow temperature", c.shadowsTemperature, -1f..1f, f2(c.shadowsTemperature)) { v -> vm.update(id) { it.copy(shadowsTemperature = v) } }
+            Slide("Shadow tint", c.shadowsTint, -1f..1f, f2(c.shadowsTint)) { v -> vm.update(id) { it.copy(shadowsTint = v) } }
+            Text("Midtones", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+            Slide("Midtone temperature", c.midtonesTemperature, -1f..1f, f2(c.midtonesTemperature)) { v -> vm.update(id) { it.copy(midtonesTemperature = v) } }
+            Slide("Midtone tint", c.midtonesTint, -1f..1f, f2(c.midtonesTint)) { v -> vm.update(id) { it.copy(midtonesTint = v) } }
+            Text("Highlights", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+            Slide("Highlight temperature", c.highlightsTemperature, -1f..1f, f2(c.highlightsTemperature)) { v -> vm.update(id) { it.copy(highlightsTemperature = v) } }
+            Slide("Highlight tint", c.highlightsTint, -1f..1f, f2(c.highlightsTint)) { v -> vm.update(id) { it.copy(highlightsTint = v) } }
             Text("3D color LUT", fontWeight = FontWeight.SemiBold)
             Text("Import a .cube look-up table for GPU-based video grading. LUTs are stored with the project; photos are not supported in this first integration.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1284,7 +1295,10 @@ private fun ToolPanel(
                     it.copy(
                         brightness = 0f, contrast = 0f, saturation = 0f, warmth = 0f, tint = 0f, hue = 0f,
                         redGain = 1f, greenGain = 1f, blueGain = 1f,
-                        toneShadows = 0f, toneMidtones = 0f, toneHighlights = 0f
+                        toneShadows = 0f, toneMidtones = 0f, toneHighlights = 0f,
+                        shadowsTemperature = 0f, shadowsTint = 0f,
+                        midtonesTemperature = 0f, midtonesTint = 0f,
+                        highlightsTemperature = 0f, highlightsTint = 0f
                     )
                 }
             }) { Text("Reset") }

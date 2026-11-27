@@ -385,6 +385,15 @@ fun isValidTint(tint: Float): Boolean = tint.isFinite() && tint in -1f..1f
 fun isValidToneCurve(shadows: Float, midtones: Float, highlights: Float): Boolean =
     listOf(shadows, midtones, highlights).all { it.isFinite() && it in -0.2f..0.2f }
 
+fun isValidColorWheels(
+    shadowsTemperature: Float, shadowsTint: Float,
+    midtonesTemperature: Float, midtonesTint: Float,
+    highlightsTemperature: Float, highlightsTint: Float
+): Boolean = listOf(
+    shadowsTemperature, shadowsTint, midtonesTemperature, midtonesTint,
+    highlightsTemperature, highlightsTint
+).all { it.isFinite() && it in -1f..1f }
+
 fun isValidProjectClipMetadata(
     id: Long,
     uriString: String,
@@ -400,7 +409,13 @@ fun isValidProjectClipMetadata(
     redGain: Float = 1f,
     greenGain: Float = 1f,
     blueGain: Float = 1f,
-    tint: Float = 0f
+    tint: Float = 0f,
+    shadowsTemperature: Float = 0f,
+    shadowsTint: Float = 0f,
+    midtonesTemperature: Float = 0f,
+    midtonesTint: Float = 0f,
+    highlightsTemperature: Float = 0f,
+    highlightsTint: Float = 0f
 ): Boolean =
     id > 0L &&
         uriString.isNotBlank() &&
@@ -412,12 +427,14 @@ fun isValidProjectClipMetadata(
         zoom > 0f && zoom.isFinite() &&
         adjustments.all { it.isFinite() } &&
         isValidColorChannelGain(redGain, greenGain, blueGain) &&
-        isValidTint(tint)
+        isValidTint(tint) &&
+        isValidColorWheels(shadowsTemperature, shadowsTint, midtonesTemperature, midtonesTint, highlightsTemperature, highlightsTint)
 
 fun Clip.isValidProjectClip(): Boolean = isValidProjectClipMetadata(
     id, uri.toString(), durationMs, width, height, startMs, endMs, speed, volume, zoom,
     listOf(cropL, cropR, cropT, cropB, brightness, contrast, saturation, warmth, hue),
-    redGain, greenGain, blueGain, tint
+    redGain, greenGain, blueGain, tint,
+    shadowsTemperature, shadowsTint, midtonesTemperature, midtonesTint, highlightsTemperature, highlightsTint
 )
 
 data class Clip(
@@ -455,6 +472,13 @@ data class Clip(
     val toneShadows: Float = 0f,
     val toneMidtones: Float = 0f,
     val toneHighlights: Float = 0f,
+    /** Three-way tonal color wheels; temperature is blue↔amber, tint is green↔magenta. */
+    val shadowsTemperature: Float = 0f,
+    val shadowsTint: Float = 0f,
+    val midtonesTemperature: Float = 0f,
+    val midtonesTint: Float = 0f,
+    val highlightsTemperature: Float = 0f,
+    val highlightsTint: Float = 0f,
     /** Persisted document URI for an optional 3D .cube color LUT. */
     val lutUri: String? = null,
     val filter: Filter = Filter.None,
@@ -486,7 +510,11 @@ fun Clip.toJson(): JSONObject = JSONObject().apply {
     put("cl", cropL.toDouble()); put("cr", cropR.toDouble()); put("ct", cropT.toDouble()); put("cb", cropB.toDouble())
     put("br", brightness.toDouble()); put("co", contrast.toDouble()); put("sa", saturation.toDouble())
     put("wa", warmth.toDouble()); put("tint", tint.toDouble()); put("hue", hue.toDouble())
-    put("rg", redGain.toDouble()); put("gg", greenGain.toDouble()); put("bgain", blueGain.toDouble()); put("toneSh", toneShadows.toDouble()); put("toneMid", toneMidtones.toDouble()); put("toneHi", toneHighlights.toDouble()); put("lutUri", lutUri ?: JSONObject.NULL)
+    put("rg", redGain.toDouble()); put("gg", greenGain.toDouble()); put("bgain", blueGain.toDouble()); put("toneSh", toneShadows.toDouble()); put("toneMid", toneMidtones.toDouble()); put("toneHi", toneHighlights.toDouble())
+    put("shTemp", shadowsTemperature.toDouble()); put("shTint", shadowsTint.toDouble())
+    put("midTemp", midtonesTemperature.toDouble()); put("midTint", midtonesTint.toDouble())
+    put("hiTemp", highlightsTemperature.toDouble()); put("hiTint", highlightsTint.toDouble())
+    put("lutUri", lutUri ?: JSONObject.NULL)
     put("filter", filter.name); put("anim", anim.name); put("fin", fadeInMs); put("fout", fadeOutMs)
     put("audioEq", JSONArray().apply { audioEqGainsDb.forEach { put(it.toDouble()) } })
     put("audioFadeIn", audioFadeInMs.coerceAtLeast(0L)); put("audioFadeOut", audioFadeOutMs.coerceAtLeast(0L))
@@ -559,6 +587,12 @@ fun clipFromJson(o: JSONObject): Clip {
         toneShadows = o.optDouble("toneSh", 0.0).toFloat(),
         toneMidtones = o.optDouble("toneMid", 0.0).toFloat(),
         toneHighlights = o.optDouble("toneHi", 0.0).toFloat(),
+        shadowsTemperature = o.optDouble("shTemp", 0.0).toFloat(),
+        shadowsTint = o.optDouble("shTint", 0.0).toFloat(),
+        midtonesTemperature = o.optDouble("midTemp", 0.0).toFloat(),
+        midtonesTint = o.optDouble("midTint", 0.0).toFloat(),
+        highlightsTemperature = o.optDouble("hiTemp", 0.0).toFloat(),
+        highlightsTint = o.optDouble("hiTint", 0.0).toFloat(),
         lutUri = o.optString("lutUri").takeIf { it.isNotBlank() && it != "null" },
         filter = runCatching { Filter.valueOf(o.getString("filter")) }.getOrDefault(Filter.None),
         anim = runCatching { Anim.valueOf(o.getString("anim")) }.getOrDefault(Anim.None),
