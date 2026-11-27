@@ -984,6 +984,14 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Returns a human-readable problem, or null if export can start. */
     private fun preflight(): String? {
+        if (overlayClips.any { !it.isImage }) {
+            return "PIP video is available in preview and timeline, but video-layer export is still being implemented. Remove the PIP video layer or export a project with PIP photos only."
+        }
+        overlayClips.forEach { layer ->
+            if (!canOpen(Uri.parse(layer.uriString))) {
+                return "The PIP file “${layer.name}” is no longer available. Remove it and add it again."
+            }
+        }
         clips.forEachIndexed { i, c ->
             if (!canOpen(c.uri)) return "Clip ${i + 1} is no longer available. Delete it or add it again."
         }
