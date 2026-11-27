@@ -542,6 +542,21 @@ private fun Timeline(
                                     .width(w.dp).height(23.dp)
                                     .clip(RoundedCornerShape(7.dp))
                                     .background(Brush.horizontalGradient(listOf(Color(0xFF087E8B), Color(0xFF4F46E5))))
+                                    .pointerInput(layer.id, dpPerSec) {
+                                        detectDragGesturesAfterLongPress(
+                                            onDragStart = { vm.selectedOverlayId = layer.id },
+                                            onDrag = { change, dragAmount ->
+                                                change.consume()
+                                                val deltaMs = (dragAmount.x / dpPerSec.coerceAtLeast(1f) * 1000f).toLong()
+                                                if (deltaMs != 0L) {
+                                                    val maxStart = (vm.timeline.totalMs() - layer.outputMs).coerceAtLeast(0L)
+                                                    vm.updateOverlay(layer.id) {
+                                                        it.copy(timelineStartMs = (it.timelineStartMs + deltaMs).coerceIn(0L, maxStart))
+                                                    }
+                                                }
+                                            }
+                                        )
+                                    }
                                     .clickable { vm.selectedOverlayId = layer.id }
                                     .padding(horizontal = 6.dp),
                                 contentAlignment = Alignment.CenterStart
