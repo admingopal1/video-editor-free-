@@ -108,6 +108,8 @@ class OverlayClipTest {
     fun overlayValidationRejectsNonFiniteAndOutOfRangeEditingValues() {
         val valid = sample()
 
+        assertFalse(valid.copy(uriString = "").isValidOverlayClip())
+        assertFalse(valid.copy(uriString = "   ").isValidOverlayClip())
         assertFalse(valid.copy(speed = Float.NaN).isValidOverlayClip())
         assertFalse(valid.copy(speed = Float.POSITIVE_INFINITY).isValidOverlayClip())
         assertFalse(valid.copy(scale = Float.NEGATIVE_INFINITY).isValidOverlayClip())
