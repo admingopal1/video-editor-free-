@@ -115,6 +115,8 @@ fun EditorScreen(vm: EditorViewModel) {
     var tool by remember { mutableStateOf<Tool?>(null) }
     var dpPerSec by remember { mutableFloatStateOf(40f) }
     var showProjects by remember { mutableStateOf(false) }
+    var audioRenameId by remember { mutableStateOf<Long?>(null) }
+    var audioRenameValue by remember { mutableStateOf("") }
     var kfSel by remember { mutableIntStateOf(0) }
     val clip = vm.selected
     val pos = vm.playheadLocalMediaMs()      // time inside the clip under the playhead (media ms)
@@ -379,6 +381,16 @@ fun EditorScreen(vm: EditorViewModel) {
             text = { Text(s.message) },
             confirmButton = { TextButton(onClick = { vm.dismissExport(); vm.startExport() }) { Text("Retry") } },
             dismissButton = { TextButton(onClick = { vm.dismissExport() }) { Text("Close") } }
+        )
+    }
+    val renamingAudio = vm.audioTracks.firstOrNull { it.id == audioRenameId }
+    if (renamingAudio != null) {
+        AlertDialog(
+            onDismissRequest = { audioRenameId = null },
+            title = { Text("Rename audio track") },
+            text = { OutlinedTextField(value = audioRenameValue, onValueChange = { audioRenameValue = it }, singleLine = true, label = { Text("Track name") }) },
+            confirmButton = { TextButton(onClick = { vm.renameAudio(renamingAudio.id, audioRenameValue); audioRenameId = null }) { Text("Save") } },
+            dismissButton = { TextButton(onClick = { audioRenameId = null }) { Text("Cancel") } }
         )
     }
 }
@@ -1415,6 +1427,7 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("♪ ${t.name}", Modifier.weight(1f), maxLines = 1)
+                TextButton(onClick = { audioRenameId = t.id; audioRenameValue = t.name }) { Text("Rename") }
                 val audioIndex = vm.audioTracks.indexOfFirst { it.id == t.id }
                 TextButton(onClick = { vm.moveAudioTrack(t.id, -1) }, enabled = audioIndex > 0) { Text("↑") }
                 TextButton(onClick = { vm.moveAudioTrack(t.id, 1) }, enabled = audioIndex in 0 until vm.audioTracks.lastIndex) { Text("↓") }

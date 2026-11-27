@@ -36,6 +36,8 @@ fun isAudioTrackAudible(muted: Boolean, solo: Boolean, anyUnmutedSolo: Boolean):
 /** Moves a track ID one position in the visible audio-track order; boundaries are no-ops. */
 fun duplicateAudioTrackName(name: String): String = "$name copy"
 
+fun normalizedAudioTrackName(name: String): String = name.trim().take(80)
+
 fun duplicateAudioTrack(track: AudioTrack, newId: Long): AudioTrack =
     track.copy(id = newId, name = duplicateAudioTrackName(track.name))
 

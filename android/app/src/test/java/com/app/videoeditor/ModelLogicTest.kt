@@ -14,6 +14,13 @@ class ModelLogicTest {
     }
 
     @Test
+    fun audioTrackNameIsTrimmedAndLimited() {
+        assertEquals("Narration", normalizedAudioTrackName("  Narration  "))
+        assertEquals(80, normalizedAudioTrackName("a".repeat(100)).length)
+        assertEquals("", normalizedAudioTrackName("   "))
+    }
+
+    @Test
     fun duplicateAudioTrackNameAddsCopySuffix() {
         assertEquals("Music copy", duplicateAudioTrackName("Music"))
     }

@@ -784,6 +784,14 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         audioTracks = audioTracks.map { if (it.id == id) f(it) else it }
     }
 
+    fun renameAudio(id: Long, name: String) {
+        val normalized = normalizedAudioTrackName(name)
+        if (normalized.isBlank()) { toast("Track name cannot be empty"); return }
+        val current = audioTracks.firstOrNull { it.id == id } ?: return
+        if (current.name == normalized) return
+        updateAudio(id) { it.copy(name = normalized) }
+    }
+
     fun duplicateAudio(id: Long) {
         if (audioTracks.size >= 4) { toast("Up to 4 audio tracks"); return }
         val source = audioTracks.firstOrNull { it.id == id } ?: return
