@@ -323,11 +323,18 @@ class TimelinePlayer(
                 }
             }
             p.volume = t.volume.coerceAtMost(1f)
-            p.repeatMode = if (t.loop && t.offsetMs == 0L) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
+            p.repeatMode = if (t.loop && t.offsetMs == 0L && t.trimEndMs == Long.MAX_VALUE) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
             val wanted = timeMs - t.offsetMs + t.trimStartMs
-            if (!isPlaying || timeMs < t.offsetMs) {
+            val reachedTrimEnd = t.trimEndMs != Long.MAX_VALUE && wanted >= t.trimEndMs
+            if (!isPlaying || timeMs < t.offsetMs || reachedTrimEnd) {
                 p.pause()
-                if (force) p.seekTo(if (timeMs < t.offsetMs) t.trimStartMs else wanted.coerceAtLeast(0L))
+                if (force) p.seekTo(
+                    when {
+                        timeMs < t.offsetMs -> t.trimStartMs
+                        reachedTrimEnd -> t.trimEndMs
+                        else -> wanted.coerceAtLeast(0L)
+                    }
+                )
             } else {
                 if (force || abs(p.currentPosition - wanted) > 400L) p.seekTo(wanted.coerceAtLeast(0L))
                 p.play()
