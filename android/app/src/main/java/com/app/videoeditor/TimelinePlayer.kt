@@ -320,7 +320,7 @@ class TimelinePlayer(
         audioPlayers.keys.filter { it !in ids }.forEach { id -> audioPlayers.remove(id)?.release() }
         val voiceovers = tracks.filter { it.isVoiceover }
         val voiceWaveforms = voiceovers.mapNotNull { voice -> waveformProvider(voice.uri)?.let { voice.id to it } }.toMap()
-        val cacheKey = tracks.joinToString("|") { "${it.id}:${it.offsetMs}:${it.trimStartMs}:${it.isVoiceover}:${it.autoDuck}:${waveformProvider(it.uri)?.let { wave -> System.identityHashCode(wave) } ?: 0}" }
+        val cacheKey = tracks.joinToString("|") { "${it.id}:${it.offsetMs}:${it.trimStartMs}:${it.trimEndMs}:${it.isVoiceover}:${it.autoDuck}:${waveformProvider(it.uri)?.let { wave -> System.identityHashCode(wave) } ?: 0}" }
         if (cacheKey != duckingCacheKey) {
             duckingCacheKey = cacheKey
             duckingCache = tracks.filter { it.autoDuck && !it.isVoiceover }.associate { track ->
@@ -340,7 +340,7 @@ class TimelinePlayer(
             val keyframeGain = audioKeyframeGainAt(t.gainPoints, elapsedMs)
             val duckGain = audioKeyframeGainAt(duckingCache[t.id] ?: emptyList(), elapsedMs)
             p.volume = (t.volume * fadeGain * keyframeGain * duckGain).coerceIn(0f, 1f)
-            p.repeatMode = if (t.loop && t.fadeInMs == 0L && t.fadeOutMs == 0L && t.gainPoints.isEmpty() && t.offsetMs == 0L && t.trimEndMs == Long.MAX_VALUE) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
+            p.repeatMode = if (t.loop && t.fadeInMs == 0L && t.fadeOutMs == 0L && t.gainPoints.isEmpty() && !t.autoDuck && (duckingCache[t.id].isNullOrEmpty()) && t.offsetMs == 0L && t.trimEndMs == Long.MAX_VALUE) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
             val wanted = timeMs - t.offsetMs + t.trimStartMs
             val reachedTrimEnd = t.trimEndMs != Long.MAX_VALUE && wanted >= t.trimEndMs
             if (!isPlaying || timeMs < t.offsetMs || reachedTrimEnd) {
