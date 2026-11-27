@@ -134,13 +134,15 @@ fun moveAudioGainPoint(points: List<AudioGainPoint>, index: Int, deltaMs: Long):
     if (index !in points.indices || deltaMs == 0L) return points
     val occupied = points.filterIndexed { i, _ -> i != index }.map { it.timeMs }.toHashSet()
     val current = points[index]
-    var target = if (deltaMs < 0L) (current.timeMs + deltaMs).coerceAtLeast(0L)
-        else (current.timeMs + deltaMs).coerceAtLeast(current.timeMs)
+    var target = when {
+        deltaMs < 0L -> if (deltaMs == Long.MIN_VALUE) 0L else (current.timeMs + deltaMs).coerceAtLeast(0L)
+        current.timeMs > Long.MAX_VALUE - deltaMs -> Long.MAX_VALUE
+        else -> current.timeMs + deltaMs
+    }
     val step = if (deltaMs < 0L) -100L else 100L
     while (target in occupied) {
-        val next = target + step
-        if (next < 0L || next > Long.MAX_VALUE - 100L) break
-        target = next
+        if ((step < 0L && target < 100L) || (step > 0L && target > Long.MAX_VALUE - 100L)) return points
+        target += step
     }
     return points.mapIndexed { i, point -> if (i == index) point.copy(timeMs = target) else point }
         .sortedBy { it.timeMs }
