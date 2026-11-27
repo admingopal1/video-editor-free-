@@ -43,7 +43,7 @@ android {
 }
 
 dependencies {
-    val media3 = "1.4.1"
+    val media3 = "1.5.1"
     implementation("androidx.media3:media3-exoplayer:$media3")
     implementation("androidx.media3:media3-transformer:$media3")
     implementation("androidx.media3:media3-effect:$media3")
