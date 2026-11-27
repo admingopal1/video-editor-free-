@@ -83,6 +83,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import kotlin.math.roundToLong
 import kotlin.math.abs
 
 enum class Tool(val title: String) {
@@ -742,11 +743,65 @@ private fun Timeline(
                                 val w = maxOf(widths[i] * (endFraction - startFraction), 30f)
                                 Box(
                                     Modifier.offset(x = x.dp, y = (lane * 24).dp).width(w.dp).height(22.dp)
-                                        .clip(RoundedCornerShape(8.dp)).background(Brush.horizontalGradient(listOf(Pal.violetDeep, Pal.pink)))
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Brush.horizontalGradient(listOf(Pal.violetDeep, Pal.pink)))
                                         .clickable { vm.selectClip(c.id); vm.selectedLayerId = layer.id; openTool(Tool.Text) }
-                                        .padding(horizontal = 5.dp),
-                                    contentAlignment = Alignment.CenterStart
-                                ) { Text(layer.text.take(12), fontSize = 10.sp, maxLines = 1, color = Color.White) }
+                                ) {
+                                    Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            Modifier.width(8.dp).fillMaxHeight().background(Pal.cyan)
+                                                .pointerInput(c.id, layer.id, dpPerSec) {
+                                                    detectHorizontalDragGestures(
+                                                        onDragStart = { vm.selectClip(c.id); vm.selectedLayerId = layer.id },
+                                                        onDragEnd = { vm.onProjectChanged() },
+                                                        onHorizontalDrag = { change, dragAmount ->
+                                                            change.consume()
+                                                            val deltaMs = (dragAmount / dpPerSec.coerceAtLeast(1f) * 1_000f).roundToLong()
+                                                            if (deltaMs != 0L) vm.updateLayer(layer.id) {
+                                                                trimTextLayerStart(it, c.outputMs, deltaMs)
+                                                            }
+                                                        }
+                                                    )
+                                                }
+                                        )
+                                        Box(
+                                            Modifier.weight(1f).fillMaxHeight()
+                                                .pointerInput(c.id, layer.id, dpPerSec) {
+                                                    detectHorizontalDragGestures(
+                                                        onDragStart = { vm.selectClip(c.id); vm.selectedLayerId = layer.id },
+                                                        onDragEnd = { vm.onProjectChanged() },
+                                                        onHorizontalDrag = { change, dragAmount ->
+                                                            change.consume()
+                                                            val deltaMs = (dragAmount / dpPerSec.coerceAtLeast(1f) * 1_000f).roundToLong()
+                                                            if (deltaMs != 0L) vm.updateLayer(layer.id) {
+                                                                moveTextLayerTiming(it, c.outputMs, deltaMs)
+                                                            }
+                                                        }
+                                                    )
+                                                },
+                                            contentAlignment = Alignment.CenterStart
+                                        ) {
+                                            Text(layer.text.take(12), fontSize = 10.sp, maxLines = 1, color = Color.White,
+                                                modifier = Modifier.padding(horizontal = 3.dp))
+                                        }
+                                        Box(
+                                            Modifier.width(8.dp).fillMaxHeight().background(Pal.cyan)
+                                                .pointerInput(c.id, layer.id, dpPerSec) {
+                                                    detectHorizontalDragGestures(
+                                                        onDragStart = { vm.selectClip(c.id); vm.selectedLayerId = layer.id },
+                                                        onDragEnd = { vm.onProjectChanged() },
+                                                        onHorizontalDrag = { change, dragAmount ->
+                                                            change.consume()
+                                                            val deltaMs = (dragAmount / dpPerSec.coerceAtLeast(1f) * 1_000f).roundToLong()
+                                                            if (deltaMs != 0L) vm.updateLayer(layer.id) {
+                                                                trimTextLayerEnd(it, c.outputMs, deltaMs)
+                                                            }
+                                                        }
+                                                    )
+                                                }
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
