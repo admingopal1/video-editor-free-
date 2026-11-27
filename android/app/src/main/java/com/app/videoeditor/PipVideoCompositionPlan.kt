@@ -1,5 +1,8 @@
 package com.app.videoeditor
 
+private fun millisecondsToMicrosecondsSaturated(valueMs: Long): Long =
+    if (valueMs > Long.MAX_VALUE / 1_000L) Long.MAX_VALUE else valueMs * 1_000L
+
 /**
  * Stable input assignment for the future multi-source PIP compositor.
  *
@@ -12,21 +15,17 @@ data class PipVideoInputPlan(
     val inputId: Int,
     val layer: OverlayClip
 ) {
-    val timelineStartUs: Long get() = layer.timelineStartMs * 1_000L
-    val timelineEndUs: Long get() = layer.timelineEndMs * 1_000L
+    val timelineStartUs: Long get() = millisecondsToMicrosecondsSaturated(layer.timelineStartMs)
+    val timelineEndUs: Long get() = millisecondsToMicrosecondsSaturated(layer.timelineEndMs)
 
     /** Returns source PTS in microseconds, or null while this layer is inactive. */
     fun sourceTimeUs(projectTimeUs: Long): Long? {
         if (projectTimeUs < 0L) return null
         val sourceMs = overlaySourceTimeMs(layer, projectTimeUs / 1_000L) ?: return null
-        return sourceMs * 1_000L
+        return millisecondsToMicrosecondsSaturated(sourceMs)
     }
 }
 
-/**
- * Builds deterministic PIP-video input IDs. Images are already handled by the
- * existing per-clip OverlayEffect path and must not consume video input IDs.
- */
 fun buildPipVideoCompositionPlan(layers: List<OverlayClip>): List<PipVideoInputPlan> =
     layers.asSequence()
         .filter { !it.isImage && it.isValidOverlayClip() }

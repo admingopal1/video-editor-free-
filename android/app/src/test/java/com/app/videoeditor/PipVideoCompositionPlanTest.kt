@@ -9,8 +9,6 @@ class PipVideoCompositionPlanTest {
     private fun layer(
         id: Long,
         order: Int,
-        startMs: Long = 1_000L,
-        endMs: Long = 5_000L,
         timelineStartMs: Long = 2_000L,
         speed: Float = 1f,
         image: Boolean = false
@@ -21,8 +19,8 @@ class PipVideoCompositionPlanTest {
         durationMs = 8_000L,
         width = 1280,
         height = 720,
-        startMs = startMs,
-        endMs = endMs,
+        startMs = 1_000L,
+        endMs = 5_000L,
         timelineStartMs = timelineStartMs,
         speed = speed,
         isImage = image,
@@ -32,11 +30,7 @@ class PipVideoCompositionPlanTest {
     @Test
     fun reservesInputZeroAndAssignsVideoInputsBackToFrontDeterministically() {
         val plan = buildPipVideoCompositionPlan(
-            listOf(
-                layer(id = 30L, order = 2),
-                layer(id = 20L, order = 1),
-                layer(id = 10L, order = 1)
-            )
+            listOf(layer(30L, 2), layer(20L, 1), layer(10L, 1))
         )
 
         assertEquals(listOf(1, 2, 3), plan.map { it.inputId })
@@ -47,11 +41,7 @@ class PipVideoCompositionPlanTest {
     @Test
     fun stillImagesAndInvalidLayersDoNotConsumeVideoInputIds() {
         val plan = buildPipVideoCompositionPlan(
-            listOf(
-                layer(id = 1L, order = 0, image = true),
-                layer(id = 2L, order = 1, speed = Float.NaN),
-                layer(id = 3L, order = 2)
-            )
+            listOf(layer(1L, 0, image = true), layer(2L, 1, speed = Float.NaN), layer(3L, 2))
         )
 
         assertEquals(1, plan.size)
@@ -62,7 +52,7 @@ class PipVideoCompositionPlanTest {
     @Test
     fun sourceClockHonorsTimelineOffsetTrimSpeedAndExclusiveEnd() {
         val plan = buildPipVideoCompositionPlan(
-            listOf(layer(id = 5L, order = 0, timelineStartMs = 2_000L, speed = 2f))
+            listOf(layer(5L, 0, timelineStartMs = 2_000L, speed = 2f))
         ).single()
 
         assertEquals(2_000_000L, plan.timelineStartUs)
@@ -74,8 +64,19 @@ class PipVideoCompositionPlanTest {
     }
 
     @Test
+    fun timestampConversionSaturatesInsteadOfOverflowing() {
+        val plan = buildPipVideoCompositionPlan(
+            listOf(layer(6L, 0, timelineStartMs = Long.MAX_VALUE - 1L))
+        ).single()
+
+        assertEquals(Long.MAX_VALUE, plan.timelineStartUs)
+        assertEquals(Long.MAX_VALUE, plan.timelineEndUs)
+        assertEquals(Long.MAX_VALUE, plan.sourceTimeUs(Long.MAX_VALUE))
+    }
+
+    @Test
     fun emptyOrImageOnlyProjectsHaveNoVideoInputs() {
         assertTrue(buildPipVideoCompositionPlan(emptyList()).isEmpty())
-        assertTrue(buildPipVideoCompositionPlan(listOf(layer(id = 1L, order = 0, image = true))).isEmpty())
+        assertTrue(buildPipVideoCompositionPlan(listOf(layer(1L, 0, image = true))).isEmpty())
     }
 }
