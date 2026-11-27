@@ -89,6 +89,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     /** Keep original project JSON untouched until the user accepts missing-media recovery. */
     var missingMediaCount by mutableIntStateOf(0); private set
     var missingMediaRecoveryPending by mutableStateOf(false); private set
+    var missingMediaItems by mutableStateOf(listOf<MissingMediaItem>()); private set
+    private var recoverySourceJson: String? = null
 
     var clips by mutableStateOf(listOf<Clip>()); private set
     var selectedId by mutableStateOf<Long?>(null)
@@ -404,7 +406,9 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun projectThumb(id: String): Bitmap? = BitmapFactory.decodeFile(File(projectsDir, "$id.jpg").path)
 
-    private class Loaded(val o: JSONObject, val clips: List<Clip>, val thumbs: Map<Long, Bitmap>, val dropped: Int, val audio: List<AudioTrack>, val overlays: List<OverlayClip>)
+    private data class MissingMediaItem(val kind: String, val id: Long, val name: String)
+
+    private class Loaded(val o: JSONObject, val clips: List<Clip>, val thumbs: Map<Long, Bitmap>, val dropped: Int, val audio: List<AudioTrack>, val overlays: List<OverlayClip>, val missing: List<MissingMediaItem>, val raw: String)
 
     private fun canOpen(uri: Uri): Boolean = try {
         ctx.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
@@ -419,6 +423,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val clipIds = mutableSetOf<Long>()
         val th = mutableMapOf<Long, Bitmap>()
         var dropped = 0
+        val missing = mutableListOf<MissingMediaItem>()
         for (i in 0 until arr.length()) {
             val clipJson = arr.optJSONObject(i)
             val clip = runCatching { clipJson?.let { clipFromJson(it) } }.getOrNull()
@@ -428,9 +433,17 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                 continue
             }
             val c = clip
+            if (!canOpen(c.uri)) {
+                dropped++
+                missing += MissingMediaItem("clip", c.id, displayName(c.uri))
+                continue
+            }
             if (c.isImage) {
                 val bitmap = runCatching { decodeBitmap(c.uri, 320) }.getOrNull()
-                if (bitmap != null) { list += c; th[c.id] = bitmap } else dropped++
+                if (bitmap != null) { list += c; th[c.id] = bitmap } else {
+                    dropped++
+                    missing += MissingMediaItem("clip", c.id, displayName(c.uri))
+                }
             } else {
                 val retriever = MediaMetadataRetriever()
                 try {
@@ -439,6 +452,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                     list += c
                 } catch (e: Exception) {
                     dropped++
+                    missing += MissingMediaItem("clip", c.id, displayName(c.uri))
                 } finally {
                     runCatching { retriever.release() }
                 }
@@ -452,8 +466,13 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                 // One malformed audio entry must not prevent recovery of the rest of the project.
                 val audioJson = aArr.optJSONObject(i)
                 val track = runCatching { audioJson?.let { audioFromJson(it) } }.getOrNull()
-                if (track == null || !track.isValidProjectAudioTrack() || !audioIds.add(track.id) || !canOpen(track.uri)) {
+                if (track == null || !track.isValidProjectAudioTrack() || !audioIds.add(track.id)) {
                     dropped++
+                    continue
+                }
+                if (!canOpen(track.uri)) {
+                    dropped++
+                    missing += MissingMediaItem("audio", track.id, track.name)
                     continue
                 }
                 tracks += track
@@ -482,16 +501,18 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                 val overlayUri = Uri.parse(overlay.uriString)
                 if (!canOpen(overlayUri)) {
                     dropped++
+                    missing += MissingMediaItem("overlay", overlay.id, overlay.name)
                     continue
                 }
                 if (overlay.isImage && decodeBitmap(overlayUri, 320) == null) {
                     dropped++
+                    missing += MissingMediaItem("overlay", overlay.id, overlay.name)
                     continue
                 }
                 overlays += overlay
             }
         }
-        Loaded(o, list, th, dropped, tracks, overlays)
+        Loaded(o, list, th, dropped, tracks, overlays, missing, raw)
     }.getOrNull()
 
     private fun resetPlayback() {
@@ -510,6 +531,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         projectName = l.o.optString("name", "My project")
         thumbs.clear(); thumbs.putAll(l.thumbs)
         missingMediaCount = l.dropped
+        missingMediaItems = l.missing
+        recoverySourceJson = l.raw.takeIf { l.dropped > 0 }
         missingMediaRecoveryPending = l.dropped > 0
         undoStack.clear(); redoStack.clear(); undoCount = 0; redoCount = 0
         clips = l.clips
@@ -546,6 +569,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun startEmpty(name: String) {
         missingMediaCount = 0
+        missingMediaItems = emptyList()
+        recoverySourceJson = null
         missingMediaRecoveryPending = false
         resetPlayback()
         projectId = System.currentTimeMillis().toString()
