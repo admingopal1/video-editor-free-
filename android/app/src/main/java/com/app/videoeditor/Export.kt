@@ -279,11 +279,13 @@ private fun addColorEffects(l: MutableList<Effect>, c: Clip, context: Context? =
             .setBlueScale(1f - 0.3f * c.warmth)
             .build()
     }
-    if (c.redGain != 1f || c.greenGain != 1f || c.blueGain != 1f) {
+    val tintRedBlue = 1f + 0.12f * c.tint
+    val tintGreen = 1f - 0.12f * c.tint
+    if (c.redGain != 1f || c.greenGain != 1f || c.blueGain != 1f || c.tint != 0f) {
         l += RgbAdjustment.Builder()
-            .setRedScale(c.redGain)
-            .setGreenScale(c.greenGain)
-            .setBlueScale(c.blueGain)
+            .setRedScale(c.redGain * tintRedBlue)
+            .setGreenScale(c.greenGain * tintGreen)
+            .setBlueScale(c.blueGain * tintRedBlue)
             .build()
     }
     when (c.filter) {

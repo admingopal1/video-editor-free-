@@ -380,6 +380,8 @@ data class ProjectInfo(val id: String, val name: String, val updated: Long, val 
 fun isValidColorChannelGain(red: Float, green: Float, blue: Float): Boolean =
     listOf(red, green, blue).all { it.isFinite() && it in 0.5f..1.5f }
 
+fun isValidTint(tint: Float): Boolean = tint.isFinite() && tint in -1f..1f
+
 fun isValidToneCurve(shadows: Float, midtones: Float, highlights: Float): Boolean =
     listOf(shadows, midtones, highlights).all { it.isFinite() && it in -0.2f..0.2f }
 
@@ -397,7 +399,8 @@ fun isValidProjectClipMetadata(
     adjustments: List<Float>,
     redGain: Float = 1f,
     greenGain: Float = 1f,
-    blueGain: Float = 1f
+    blueGain: Float = 1f,
+    tint: Float = 0f
 ): Boolean =
     id > 0L &&
         uriString.isNotBlank() &&
@@ -408,12 +411,13 @@ fun isValidProjectClipMetadata(
         volume >= 0f && volume.isFinite() &&
         zoom > 0f && zoom.isFinite() &&
         adjustments.all { it.isFinite() } &&
-        isValidColorChannelGain(redGain, greenGain, blueGain)
+        isValidColorChannelGain(redGain, greenGain, blueGain) &&
+        isValidTint(tint)
 
 fun Clip.isValidProjectClip(): Boolean = isValidProjectClipMetadata(
     id, uri.toString(), durationMs, width, height, startMs, endMs, speed, volume, zoom,
     listOf(cropL, cropR, cropT, cropB, brightness, contrast, saturation, warmth, hue),
-    redGain, greenGain, blueGain
+    redGain, greenGain, blueGain, tint
 )
 
 data class Clip(
@@ -440,6 +444,8 @@ data class Clip(
     val contrast: Float = 0f,
     val saturation: Float = 0f,
     val warmth: Float = 0f,
+    /** Green-to-magenta tint adjustment; zero is neutral. */
+    val tint: Float = 0f,
     val hue: Float = 0f,
     /** Per-channel color balance gains; 1.0 is neutral. */
     val redGain: Float = 1f,
@@ -479,7 +485,7 @@ fun Clip.toJson(): JSONObject = JSONObject().apply {
     put("rot", rotation); put("fh", flipH); put("fv", flipV); put("zoom", zoom.toDouble())
     put("cl", cropL.toDouble()); put("cr", cropR.toDouble()); put("ct", cropT.toDouble()); put("cb", cropB.toDouble())
     put("br", brightness.toDouble()); put("co", contrast.toDouble()); put("sa", saturation.toDouble())
-    put("wa", warmth.toDouble()); put("hue", hue.toDouble())
+    put("wa", warmth.toDouble()); put("tint", tint.toDouble()); put("hue", hue.toDouble())
     put("rg", redGain.toDouble()); put("gg", greenGain.toDouble()); put("bgain", blueGain.toDouble()); put("toneSh", toneShadows.toDouble()); put("toneMid", toneMidtones.toDouble()); put("toneHi", toneHighlights.toDouble()); put("lutUri", lutUri ?: JSONObject.NULL)
     put("filter", filter.name); put("anim", anim.name); put("fin", fadeInMs); put("fout", fadeOutMs)
     put("audioEq", JSONArray().apply { audioEqGainsDb.forEach { put(it.toDouble()) } })
@@ -545,6 +551,7 @@ fun clipFromJson(o: JSONObject): Clip {
         cropT = o.optDouble("ct", 0.0).toFloat(), cropB = o.optDouble("cb", 0.0).toFloat(),
         brightness = o.optDouble("br", 0.0).toFloat(), contrast = o.optDouble("co", 0.0).toFloat(),
         saturation = o.optDouble("sa", 0.0).toFloat(), warmth = o.optDouble("wa", 0.0).toFloat(),
+        tint = o.optDouble("tint", 0.0).toFloat(),
         hue = o.optDouble("hue", 0.0).toFloat(),
         redGain = o.optDouble("rg", 1.0).toFloat(),
         greenGain = o.optDouble("gg", 1.0).toFloat(),

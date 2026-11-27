@@ -16,6 +16,17 @@ class ColorGradeTest {
     }
 
     @Test
+    fun tintAcceptsGreenToMagentaRangeAndNeutralDefault() {
+        assertTrue(isValidTint(0f))
+        assertTrue(isValidTint(-1f))
+        assertTrue(isValidTint(1f))
+        assertFalse(isValidTint(Float.NaN))
+        assertFalse(isValidTint(Float.POSITIVE_INFINITY))
+        assertFalse(isValidTint(1.01f))
+        assertFalse(isValidTint(-1.01f))
+    }
+
+    @Test
     fun channelGainsAcceptSupportedRange() {
         assertTrue(isValidColorChannelGain(0.5f, 1f, 1.5f))
     }

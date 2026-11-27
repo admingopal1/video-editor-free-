@@ -1260,6 +1260,7 @@ private fun ToolPanel(
             Slide("Contrast", c.contrast, -0.5f..0.5f, f2(c.contrast)) { v -> vm.update(id) { it.copy(contrast = v) } }
             Slide("Saturation", c.saturation, -1f..1f, f2(c.saturation)) { v -> vm.update(id) { it.copy(saturation = v) } }
             Slide("Warmth", c.warmth, -1f..1f, f2(c.warmth)) { v -> vm.update(id) { it.copy(warmth = v) } }
+            Slide("Tint · Green ↔ Magenta", c.tint, -1f..1f, f2(c.tint)) { v -> vm.update(id) { it.copy(tint = v) } }
             Slide("Hue", c.hue, -1f..1f, f2(c.hue)) { v -> vm.update(id) { it.copy(hue = v) } }
             Text("Master tone curve", fontWeight = FontWeight.SemiBold)
             Text("Shape shadows, midtones and highlights with a GPU tone curve. Video clips only in this version.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
@@ -1281,7 +1282,7 @@ private fun ToolPanel(
             OutlinedButton(onClick = {
                 vm.update(id) {
                     it.copy(
-                        brightness = 0f, contrast = 0f, saturation = 0f, warmth = 0f, hue = 0f,
+                        brightness = 0f, contrast = 0f, saturation = 0f, warmth = 0f, tint = 0f, hue = 0f,
                         redGain = 1f, greenGain = 1f, blueGain = 1f,
                         toneShadows = 0f, toneMidtones = 0f, toneHighlights = 0f
                     )
@@ -2120,6 +2121,7 @@ private fun imageFilter(c: Clip): ColorFilter {
     if (c.saturation != 0f) apply(saturation(1f + c.saturation))
     if (c.hue != 0f) apply(hue(c.hue * 180f))
     if (c.warmth != 0f) apply(scale(1f + 0.3f * c.warmth, 1f, 1f - 0.3f * c.warmth))
+    if (c.tint != 0f) apply(scale(1f + 0.12f * c.tint, 1f - 0.12f * c.tint, 1f + 0.12f * c.tint))
     if (c.redGain != 1f || c.greenGain != 1f || c.blueGain != 1f) {
         apply(scale(c.redGain, c.greenGain, c.blueGain))
     }
