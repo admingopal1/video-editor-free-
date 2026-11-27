@@ -46,3 +46,15 @@ fun buildPipVideoCompositionPlan(layers: List<OverlayClip>): PipVideoComposition
         primaryInputId = videoInputs.size
     )
 }
+
+
+/** Returns true only within the layer's half-open project-timeline interval. */
+internal fun isPipVideoInputVisible(
+    input: PipVideoInputPlan,
+    presentationTimeUs: Long
+): Boolean = presentationTimeUs >= input.timelineStartUs &&
+    presentationTimeUs < input.timelineEndUs
+
+/** The primary sequence is deliberately the final video input. */
+internal fun pipPrimaryInputIndex(primaryInputId: Int, inputCount: Int): Int =
+    if (inputCount <= 0) -1 else primaryInputId.coerceIn(0, inputCount - 1)
