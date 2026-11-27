@@ -1490,10 +1490,15 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
                     TextButton(
                         onClick = {
                             vm.updateAudio(t.id) { track ->
+                                val occupied = track.gainPoints.filterIndexed { i, _ -> i != index }.map { it.timeMs }.toSet()
                                 val moved = track.gainPoints.mapIndexed { i, old ->
-                                    if (i == index) old.copy(timeMs = (old.timeMs - 100L).coerceAtLeast(0L)) else old
+                                    if (i != index) old else {
+                                        var target = (old.timeMs - 100L).coerceAtLeast(0L)
+                                        while (target in occupied && target > 0L) target = (target - 100L).coerceAtLeast(0L)
+                                        old.copy(timeMs = target)
+                                    }
                                 }
-                                track.copy(gainPoints = moved.distinctBy { it.timeMs }.sortedBy { it.timeMs })
+                                track.copy(gainPoints = moved.sortedBy { it.timeMs })
                             }
                         },
                         enabled = point.timeMs > 0L
@@ -1504,10 +1509,15 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
                     TextButton(
                         onClick = {
                             vm.updateAudio(t.id) { track ->
+                                val occupied = track.gainPoints.filterIndexed { i, _ -> i != index }.map { it.timeMs }.toSet()
                                 val moved = track.gainPoints.mapIndexed { i, old ->
-                                    if (i == index) old.copy(timeMs = old.timeMs + 100L) else old
+                                    if (i != index) old else {
+                                        var target = old.timeMs + 100L
+                                        while (target in occupied && target < Long.MAX_VALUE - 100L) target += 100L
+                                        old.copy(timeMs = target)
+                                    }
                                 }
-                                track.copy(gainPoints = moved.distinctBy { it.timeMs }.sortedBy { it.timeMs })
+                                track.copy(gainPoints = moved.sortedBy { it.timeMs })
                             }
                         }
                     ) { Text("+0.1") }
