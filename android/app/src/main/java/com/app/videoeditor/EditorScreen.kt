@@ -626,8 +626,8 @@ private fun Timeline(
                                             val index = selectedIndex
                                             if (index >= 0) {
                                                 val durationMs = (w / dpPerSec * 1000f).toLong().coerceAtLeast(1L)
-                                                val targetTime = (change.position.x / size.width.coerceAtLeast(1f) * durationMs).toLong().coerceAtLeast(0L)
-                                                val targetGain = (2f * (1f - change.position.y / size.height.coerceAtLeast(1f))).coerceIn(0f, 2f)
+                                                val targetTime = (change.position.x / size.width.toFloat().coerceAtLeast(1f) * durationMs).toLong().coerceAtLeast(0L)
+                                                val targetGain = (2f * (1f - change.position.y / size.height.toFloat().coerceAtLeast(1f))).coerceIn(0f, 2f)
                                                 vm.updateAudio(t.id) { track ->
                                                     val pts = track.gainPoints
                                                     if (index !in pts.indices) track else {
