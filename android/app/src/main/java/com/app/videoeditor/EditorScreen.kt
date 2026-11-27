@@ -611,11 +611,46 @@ private fun Timeline(
                                             }
                                         )
                                     }
-                                    .clickable { vm.selectedOverlayId = layer.id }
-                                    .padding(horizontal = 6.dp),
-                                contentAlignment = Alignment.CenterStart
+                                    .clickable { vm.selectedOverlayId = layer.id },
+                                contentAlignment = Alignment.Center
                             ) {
-                                Text((if (layer.isImage) "▣ PIP photo · " else "▣ PIP video · ") + layer.name, fontSize = 10.sp, maxLines = 1, color = Color.White)
+                                Text(
+                                    (if (layer.isImage) "▣ PIP photo · " else "▣ PIP video · ") + layer.name,
+                                    Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                                    fontSize = 10.sp,
+                                    maxLines = 1,
+                                    color = Color.White
+                                )
+                                if (!layer.isImage) {
+                                    Box(
+                                        Modifier.align(Alignment.CenterStart)
+                                            .width(9.dp).fillMaxHeight()
+                                            .background(Color(0xCCFFFFFF), RoundedCornerShape(topStart = 7.dp, bottomStart = 7.dp))
+                                            .pointerInput(layer.id, dpPerSec) {
+                                                detectHorizontalDragGestures { change, dragAmount ->
+                                                    change.consume()
+                                                    val deltaMs = (dragAmount / dpPerSec.coerceAtLeast(1f) * 1000f).toLong()
+                                                    if (deltaMs != 0L) vm.updateOverlay(layer.id) {
+                                                        trimOverlayStartByOutputDelta(it, deltaMs)
+                                                    }
+                                                }
+                                            }
+                                    )
+                                    Box(
+                                        Modifier.align(Alignment.CenterEnd)
+                                            .width(9.dp).fillMaxHeight()
+                                            .background(Color(0xCCFFFFFF), RoundedCornerShape(topEnd = 7.dp, bottomEnd = 7.dp))
+                                            .pointerInput(layer.id, dpPerSec) {
+                                                detectHorizontalDragGestures { change, dragAmount ->
+                                                    change.consume()
+                                                    val deltaMs = (dragAmount / dpPerSec.coerceAtLeast(1f) * 1000f).toLong()
+                                                    if (deltaMs != 0L) vm.updateOverlay(layer.id) {
+                                                        trimOverlayEndByOutputDelta(it, deltaMs)
+                                                    }
+                                                }
+                                            }
+                                    )
+                                }
                             }
                         }
                     }
