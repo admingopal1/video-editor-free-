@@ -34,6 +34,18 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.zIndex
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -147,68 +159,83 @@ fun EditorScreen(vm: EditorViewModel) {
     fun addMedia() = pickMedia.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
     fun tick() = haptic.performHapticFeedback(HapticFeedbackType.LongPress)
 
+    AuroraBackground(animate = !playing && vm.export !is ExportState.Running) {
     Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().imePadding()) {
         // ---------- top bar ----------
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(Modifier.weight(1f).clickable { showProjects = true }) {
-                Text("${vm.projectName} ▾", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1)
+            LogoMark(Modifier.size(36.dp))
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f).pressable(onClick = { showProjects = true })) {
+                Text(
+                    "${vm.projectName} ▾",
+                    style = MaterialTheme.typography.titleMedium.copy(brush = Pal.cool),
+                    fontWeight = FontWeight.Bold, maxLines = 1
+                )
                 Text(
                     if (vm.clips.isEmpty()) "Tap to open or create projects"
                     else "${vm.clips.size} clips · ${fmt(vm.totalMs)} · ${vm.aspect.label} · ${vm.quality}p",
-                    style = MaterialTheme.typography.bodySmall, color = Color.Gray, maxLines = 1
+                    style = MaterialTheme.typography.bodySmall, color = Pal.textLo, maxLines = 1
                 )
             }
-            Button(onClick = { requestExport() }, enabled = vm.clips.isNotEmpty(), shape = RoundedCornerShape(20.dp)) {
-                Text("Export")
-            }
+            GradientButton("Export", onClick = { requestExport() }, enabled = vm.clips.isNotEmpty(), shimmer = vm.clips.isNotEmpty())
         }
 
         // ---------- live preview of the whole timeline ----------
         PreviewStage(vm, Modifier.weight(1f), onAdd = { addMedia() })
 
-        // ---------- transport + timeline header ----------
+        // ---------- transport ----------
         val totalTimeline = vm.timeline.totalMs().coerceAtLeast(1L)
-        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { vm.togglePlay() }, enabled = vm.clips.isNotEmpty()) {
-                Text(if (playing) "⏸" else "▶", style = MaterialTheme.typography.titleLarge)
+        Glass(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp), shape = RoundedCornerShape(26.dp)) {
+            Row(Modifier.padding(horizontal = 6.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                PlayButton(playing, vm.clips.isNotEmpty()) { vm.togglePlay() }
+                Slider(
+                    value = (vm.timeMs.toFloat() / totalTimeline).coerceIn(0f, 1f),
+                    onValueChange = { vm.seekTimeline((it * totalTimeline).toLong()) },
+                    enabled = vm.clips.isNotEmpty(),
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color.White, activeTrackColor = Pal.cyan, inactiveTrackColor = Color(0x33FFFFFF),
+                        disabledThumbColor = Color(0x55FFFFFF), disabledActiveTrackColor = Color(0x22FFFFFF), disabledInactiveTrackColor = Color(0x22FFFFFF)
+                    ),
+                    modifier = Modifier.weight(1f).padding(horizontal = 6.dp)
+                )
+                IconBtn(Ic.ZoomOut) { dpPerSec = (dpPerSec / 1.4f).coerceAtLeast(12f) }
+                IconBtn(Ic.ZoomIn) { dpPerSec = (dpPerSec * 1.4f).coerceAtMost(140f) }
+                IconBtn(Ic.Undo, vm.undoCount > 0) { vm.undo() }
+                IconBtn(Ic.Redo, vm.redoCount > 0) { vm.redo() }
             }
-            Slider(
-                value = (vm.timeMs.toFloat() / totalTimeline).coerceIn(0f, 1f),
-                onValueChange = { vm.seekTimeline((it * totalTimeline).toLong()) },
-                enabled = vm.clips.isNotEmpty(),
-                modifier = Modifier.weight(1f)
-            )
-            TextButton(onClick = { dpPerSec = (dpPerSec / 1.4f).coerceAtLeast(12f) }) { Text("−") }
-            TextButton(onClick = { dpPerSec = (dpPerSec * 1.4f).coerceAtMost(140f) }) { Text("＋") }
-            TextButton(onClick = { vm.undo() }, enabled = vm.undoCount > 0) { Text("↶", style = MaterialTheme.typography.titleMedium) }
-            TextButton(onClick = { vm.redo() }, enabled = vm.redoCount > 0) { Text("↷", style = MaterialTheme.typography.titleMedium) }
         }
 
         // ---------- timeline ----------
-        Timeline(vm, pos, dpPerSec, tick = { tick() }, onAdd = { addMedia() }, openTool = { tool = it })
+        Glass(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp), shape = RoundedCornerShape(24.dp)) {
+            Timeline(vm, pos, dpPerSec, tick = { tick() }, onAdd = { addMedia() }, openTool = { tool = it })
+        }
 
-        // ---------- bottom: toolbar or tool panel ----------
-        if (tool == null) {
-            Toolbar(
-                vm, clip,
-                openTool = { tick(); tool = it },
-                addMedia = { tick(); addMedia() },
-                tick = { tick() }
-            )
-        } else {
-            Column(Modifier.fillMaxWidth().height(250.dp).background(Color(0xFF16161D))) {
-                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(tool!!.title, Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
-                    TextButton(onClick = { tool = null }) { Text("✓ Done") }
-                }
-                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp)) {
-                    ToolPanel(vm, tool!!, clip, pos, kfSel, { kfSel = it }, { pickAudio.launch(arrayOf("audio/*")) }, { recordVoice() })
+        // ---------- bottom: toolbar or tool sheet ----------
+        AnimatedContent(
+            targetState = tool,
+            transitionSpec = {
+                (fadeIn(tween(220)) + slideInVertically(tween(260)) { it / 4 }) togetherWith
+                    (fadeOut(tween(120)) + slideOutVertically(tween(200)) { it / 4 })
+            },
+            label = "bottomArea"
+        ) { t ->
+            if (t == null) {
+                Toolbar(
+                    vm, clip,
+                    openTool = { tick(); tool = it },
+                    addMedia = { tick(); addMedia() },
+                    tick = { tick() }
+                )
+            } else {
+                ToolSheet(t, onDone = { tool = null }) {
+                    ToolPanel(vm, t, clip, pos, kfSel, { kfSel = it }, { pickAudio.launch(arrayOf("audio/*")) }, { recordVoice() })
                 }
             }
         }
+    }
     }
 
     if (showProjects) ProjectsDialog(vm) { showProjects = false }
@@ -317,7 +344,7 @@ private fun ProjectRow(
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(p.name + if (current) "  • open" else "", maxLines = 1, fontWeight = if (current) FontWeight.Bold else FontWeight.Normal)
-            Text("${p.clipCount} clips · ${fmt(p.durationMs)}", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+            Text("${p.clipCount} clips · ${fmt(p.durationMs)}", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
         }
         Box {
             TextButton(onClick = { menu = true }) { Text("⋮") }
@@ -392,9 +419,11 @@ private fun Timeline(
                         }
                     }
                     Box(
-                        Modifier.size(48.dp, 56.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF2A2A35)).clickable { onAdd() },
+                        Modifier.size(48.dp, 56.dp).pressable(onClick = onAdd).clip(RoundedCornerShape(12.dp))
+                            .background(Brush.linearGradient(listOf(Color(0x558B5CF6), Color(0x5522D3EE))))
+                            .border(1.dp, Pal.glassBorder, RoundedCornerShape(12.dp)),
                         contentAlignment = Alignment.Center
-                    ) { Text("＋", style = MaterialTheme.typography.titleLarge) }
+                    ) { Ico(Ic.Plus, Color.White, 22.dp) }
                 }
                 // text + sticker track: each layer sits at its own time range inside its clip
                 if (vm.clips.any { it.layers.isNotEmpty() }) {
@@ -406,7 +435,7 @@ private fun Timeline(
                                 val w = maxOf(widths[i] * (l.endFrac - l.startFrac), 30f)
                                 Box(
                                     Modifier.offset(x = x.dp, y = ((li % 3) * 24).dp).width(w.dp).height(22.dp)
-                                        .clip(RoundedCornerShape(5.dp)).background(Color(0xFF3B5BDB))
+                                        .clip(RoundedCornerShape(8.dp)).background(Brush.horizontalGradient(listOf(Pal.violetDeep, Pal.pink)))
                                         .clickable { vm.selectClip(c.id); vm.selectedLayerId = l.id; openTool(Tool.Text) }
                                         .padding(horizontal = 5.dp),
                                     contentAlignment = Alignment.CenterStart
@@ -423,8 +452,8 @@ private fun Timeline(
                     val len = if (wave != null && wave.isNotEmpty()) (wave.size * 0.1f - t.trimStartMs / 1000f) * dpPerSec else left
                     val w = maxOf(if (t.loop && t.offsetMs == 0L) left else minOf(len, left), 40f)
                     Box(
-                        Modifier.padding(top = 4.dp).offset(x = x.dp).width(w.dp).height(26.dp).clip(RoundedCornerShape(5.dp))
-                            .background(Color(0xFF1F8A4C)).clickable { openTool(Tool.Audio) },
+                        Modifier.padding(top = 4.dp).offset(x = x.dp).width(w.dp).height(26.dp).clip(RoundedCornerShape(8.dp))
+                            .background(Brush.horizontalGradient(listOf(Color(0xFF0F9D75), Pal.cyan))).clickable { openTool(Tool.Audio) },
                         contentAlignment = Alignment.CenterStart
                     ) {
                         WaveBars(wave, t.trimStartMs, t.trimStartMs + (w / dpPerSec * 1000f).toLong(), Color(0x99FFFFFF), Modifier.fillMaxSize())
@@ -435,7 +464,11 @@ private fun Timeline(
         }
         // fixed playhead
         Box(Modifier.matchParentSize(), contentAlignment = Alignment.TopCenter) {
-            Box(Modifier.width(2.dp).fillMaxHeight().background(Color.White))
+            Box(Modifier.width(3.dp).fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(Pal.cool))
+            Box(
+                Modifier.size(11.dp).shadow(8.dp, CircleShape, ambientColor = Pal.cyan, spotColor = Pal.cyan)
+                    .clip(CircleShape).background(Color.White)
+            )
         }
     }
 }
@@ -444,9 +477,13 @@ private fun Timeline(
 private fun ClipTile(vm: EditorViewModel, c: Clip, w: Dp, dpPerSec: Float, tick: () -> Unit, onTrimming: (Boolean) -> Unit) {
     val sel = c.id == vm.selectedId
     var dragging by remember { mutableStateOf(false) }
+    val tileShape = RoundedCornerShape(12.dp)
+    val glow by animateDpAsState(if (sel) 12.dp else 0.dp, tween(220), label = "glow")
     Box(
-        Modifier.size(w, 56.dp).alpha(if (dragging) 0.6f else 1f).clip(RoundedCornerShape(8.dp)).background(Color(0xFF22222B))
-            .border(BorderStroke(if (sel) 2.dp else 0.dp, if (sel) MaterialTheme.colorScheme.primary else Color.Transparent), RoundedCornerShape(8.dp))
+        Modifier.size(w, 56.dp).alpha(if (dragging) 0.6f else 1f)
+            .shadow(glow, tileShape, ambientColor = Pal.violet, spotColor = Pal.cyan)
+            .clip(tileShape).background(Color(0xFF1B1838))
+            .border(if (sel) 2.dp else 1.dp, if (sel) Pal.cool else SolidColor(Color(0x26FFFFFF)), tileShape)
             .pointerInput(c.id, sel, c.trimmedMs) {
                 detectTapGestures { off ->
                     if (!sel) vm.selectClip(c.id)
@@ -473,7 +510,7 @@ private fun ClipTile(vm: EditorViewModel, c: Clip, w: Dp, dpPerSec: Float, tick:
             WaveBars(vm.waves[c.uri.toString()], c.startMs, c.endMs, Color(0xCCFFFFFF), Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(18.dp))
         }
         Row(
-            Modifier.align(Alignment.BottomEnd).background(Color(0x99000000)).padding(horizontal = 4.dp),
+            Modifier.align(Alignment.BottomEnd).padding(3.dp).clip(RoundedCornerShape(7.dp)).background(Color(0xB30A0919)).padding(horizontal = 5.dp, vertical = 1.dp),
             horizontalArrangement = Arrangement.spacedBy(3.dp)
         ) {
             if (c.isImage) Text("🖼", fontSize = 9.sp)
@@ -488,7 +525,7 @@ private fun ClipTile(vm: EditorViewModel, c: Clip, w: Dp, dpPerSec: Float, tick:
             // trim handles
             Box(
                 Modifier.align(Alignment.CenterStart).width(16.dp).fillMaxHeight()
-                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp))
+                    .background(Pal.cool, RoundedCornerShape(topStart = 12.dp, bottomStart = 12.dp))
                     .pointerInput(c.id, c.speed, dpPerSec) {
                         detectHorizontalDragGestures(
                             onDragStart = { onTrimming(true) },
@@ -501,10 +538,10 @@ private fun ClipTile(vm: EditorViewModel, c: Clip, w: Dp, dpPerSec: Float, tick:
                         }
                     },
                 contentAlignment = Alignment.Center
-            ) { Text("‹", color = Color.White, fontWeight = FontWeight.Bold) }
+            ) { Box(Modifier.size(2.dp, 16.dp).clip(CircleShape).background(Color.White)) }
             Box(
                 Modifier.align(Alignment.CenterEnd).width(16.dp).fillMaxHeight()
-                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp))
+                    .background(Pal.cool, RoundedCornerShape(topEnd = 12.dp, bottomEnd = 12.dp))
                     .pointerInput(c.id, c.speed, dpPerSec) {
                         detectHorizontalDragGestures(
                             onDragStart = { onTrimming(true) },
@@ -517,7 +554,7 @@ private fun ClipTile(vm: EditorViewModel, c: Clip, w: Dp, dpPerSec: Float, tick:
                         }
                     },
                 contentAlignment = Alignment.Center
-            ) { Text("›", color = Color.White, fontWeight = FontWeight.Bold) }
+            ) { Box(Modifier.size(2.dp, 16.dp).clip(CircleShape).background(Color.White)) }
         }
     }
 }
@@ -526,13 +563,16 @@ private fun ClipTile(vm: EditorViewModel, c: Clip, w: Dp, dpPerSec: Float, tick:
 // Context-sensitive toolbar
 // =====================================================================
 @Composable
-private fun TB(icon: String, label: String, enabled: Boolean = true, onClick: () -> Unit) {
+private fun TB(ic: Ic, label: String, tint: Color, enabled: Boolean = true, onClick: () -> Unit) {
     Column(
-        Modifier.width(68.dp).alpha(if (enabled) 1f else 0.35f).clickable(enabled = enabled) { onClick() }.padding(vertical = 6.dp),
+        Modifier.width(64.dp).pressable(enabled, onClick).alpha(if (enabled) 1f else 0.32f).padding(vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(icon, fontSize = 21.sp)
-        Text(label, fontSize = 11.sp, maxLines = 1)
+        Glass(Modifier.size(42.dp), shape = CircleShape, strong = true, contentAlignment = Alignment.Center) {
+            Ico(ic, tint, 21.dp)
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(label, fontSize = 10.sp, color = Pal.textLo, maxLines = 1)
     }
 }
 
@@ -540,30 +580,60 @@ private fun TB(icon: String, label: String, enabled: Boolean = true, onClick: ()
 private fun Toolbar(vm: EditorViewModel, clip: Clip?, openTool: (Tool) -> Unit, addMedia: () -> Unit, tick: () -> Unit) {
     val has = clip != null
     val vid = has && clip?.isImage == false
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp)) {
-        TB("＋", "Media") { addMedia() }
-        TB("🎵", "Audio") { openTool(Tool.Audio) }
-        TB("🖼", "Canvas") { openTool(Tool.Canvas) }
-        TB("✂", "Split", vid) { tick(); vm.split() }
-        TB("⇤", "Trim left", vid) { tick(); vm.trimToPlayhead(true) }
-        TB("⇥", "Trim right", vid) { tick(); vm.trimToPlayhead(false) }
-        TB("⏩", "Speed", vid) { openTool(Tool.Speed) }
-        TB("🔊", "Volume", vid) { openTool(Tool.Volume) }
-        TB("✨", "Animate", has) { openTool(Tool.Animate) }
-        TB("🌗", "Fade", has) { openTool(Tool.Fade) }
-        TB("◆", "Keyframes", has) { openTool(Tool.Keyframes) }
-        TB("⇄", "Transition", has) { openTool(Tool.Transition) }
-        TB("🎨", "Filters", has) { openTool(Tool.Filters) }
-        TB("🎚", "Adjust", has) { openTool(Tool.Adjust) }
-        TB("⛶", "Crop", has) { openTool(Tool.Crop) }
-        TB("🔄", "Transform", has) { openTool(Tool.Transform) }
-        TB("🅣", "Text", has) { openTool(Tool.Text) }
-        TB("😀", "Stickers", has) { openTool(Tool.Stickers) }
-        TB("⧉", "Duplicate", has) { tick(); vm.duplicate() }
-        TB("⇦", "Move left", has) { vm.move(-1) }
-        TB("⇨", "Move right", has) { vm.move(1) }
-        TB("🗑", "Delete", has) { tick(); vm.delete() }
-        TB("🆕", "New project") { vm.newProject() }
+    Glass(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), shape = RoundedCornerShape(28.dp)) {
+        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp)) {
+            TB(Ic.Plus, "Media", Pal.violet) { addMedia() }
+            TB(Ic.Music, "Audio", Pal.mint) { openTool(Tool.Audio) }
+            TB(Ic.Frame, "Canvas", Pal.cyan) { openTool(Tool.Canvas) }
+            TB(Ic.Scissors, "Split", Pal.amber, vid) { tick(); vm.split() }
+            TB(Ic.TrimL, "Trim left", Pal.amber, vid) { tick(); vm.trimToPlayhead(true) }
+            TB(Ic.TrimR, "Trim right", Pal.amber, vid) { tick(); vm.trimToPlayhead(false) }
+            TB(Ic.Speed, "Speed", Pal.cyan, vid) { openTool(Tool.Speed) }
+            TB(Ic.Volume, "Volume", Pal.mint, vid) { openTool(Tool.Volume) }
+            TB(Ic.Sparkle, "Animate", Pal.pink, has) { openTool(Tool.Animate) }
+            TB(Ic.Fade, "Fade", Pal.violet, has) { openTool(Tool.Fade) }
+            TB(Ic.Diamond, "Keyframes", Pal.amber, has) { openTool(Tool.Keyframes) }
+            TB(Ic.Transition, "Transition", Pal.cyan, has) { openTool(Tool.Transition) }
+            TB(Ic.Filters, "Filters", Pal.pink, has) { openTool(Tool.Filters) }
+            TB(Ic.Sliders, "Adjust", Pal.violet, has) { openTool(Tool.Adjust) }
+            TB(Ic.Crop, "Crop", Pal.cyan, has) { openTool(Tool.Crop) }
+            TB(Ic.Rotate, "Transform", Pal.mint, has) { openTool(Tool.Transform) }
+            TB(Ic.TextT, "Text", Pal.pink, has) { openTool(Tool.Text) }
+            TB(Ic.Smile, "Stickers", Pal.amber, has) { openTool(Tool.Stickers) }
+            TB(Ic.Copy, "Duplicate", Pal.violet, has) { tick(); vm.duplicate() }
+            TB(Ic.ArrowL, "Move left", Pal.cyan, has) { vm.move(-1) }
+            TB(Ic.ArrowR, "Move right", Pal.cyan, has) { vm.move(1) }
+            TB(Ic.Trash, "Delete", Pal.danger, has) { tick(); vm.delete() }
+            TB(Ic.NewDoc, "New project", Pal.violet) { vm.newProject() }
+        }
+    }
+}
+
+/** Glass bottom sheet that hosts a tool panel. */
+@Composable
+private fun ToolSheet(tool: Tool, onDone: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    Glass(
+        Modifier.fillMaxWidth().height(262.dp).padding(horizontal = 8.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp, bottomStart = 22.dp, bottomEnd = 22.dp),
+        strong = true
+    ) {
+        Column {
+            Box(
+                Modifier.align(Alignment.CenterHorizontally).padding(top = 8.dp).size(38.dp, 4.dp)
+                    .clip(CircleShape).background(Color(0x55FFFFFF))
+            )
+            Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 12.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    tool.title, Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium.copy(brush = Pal.cool), fontWeight = FontWeight.Bold
+                )
+                GradientButton("Done", onClick = onDone, brush = Pal.cool)
+            }
+            Column(
+                Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 4.dp),
+                content = content
+            )
+        }
     }
 }
 
@@ -573,7 +643,7 @@ private fun Toolbar(vm: EditorViewModel, clip: Clip?, openTool: (Tool) -> Unit, 
 @Composable
 private fun Slide(label: String, value: Float, range: ClosedFloatingPointRange<Float>, shown: String, onChange: (Float) -> Unit) {
     Column {
-        Row { Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium); Text(shown, color = Color.Gray) }
+        Row { Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium); Text(shown, color = Pal.textLo) }
         Slider(value = value.coerceIn(range), onValueChange = onChange, valueRange = range)
     }
 }
@@ -585,7 +655,7 @@ private fun ToolPanel(
 ) {
     if (tool == Tool.Canvas) { CanvasPanel(vm); return }
     if (tool == Tool.Audio) { AudioPanel(vm, pickAudio, record); return }
-    if (c == null) { Text("Select a clip on the timeline first.", color = Color.Gray); return }
+    if (c == null) { Text("Select a clip on the timeline first.", color = Pal.textLo); return }
     val id = c.id
 
     when (tool) {
@@ -598,7 +668,7 @@ private fun ToolPanel(
                     AssistChip(onClick = { vm.update(id) { it.copy(speed = s) } }, label = { Text("${s}x") })
                 }
             }
-            Text("Speed is applied when you export.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+            Text("Speed is applied when you export.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
             Text("Speed ramp (splits the clip in 3 parts)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 AssistChip(onClick = { vm.speedRamp(0) }, label = { Text("Slow-mo moment") })
@@ -613,7 +683,7 @@ private fun ToolPanel(
             Slide("Volume", c.volume, 0f..2f, "${(c.volume * 100).toInt()}%") { v -> vm.update(id) { it.copy(volume = v) } }
         }
         Tool.Animate -> {
-            Text("Motion for this clip (great for photos). Shows in the exported video.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+            Text("Motion for this clip (great for photos). Shows in the exported video.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Anim.values().forEach { a ->
                     FilterChip(selected = c.anim == a, onClick = { vm.update(id) { it.copy(anim = a) } }, label = { Text(a.label) })
@@ -621,7 +691,7 @@ private fun ToolPanel(
             }
         }
         Tool.Fade -> {
-            Text("Fade through black. Use fade out + fade in on neighbouring clips for a dip transition.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+            Text("Fade through black. Use fade out + fade in on neighbouring clips for a dip transition.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
             Slide("Fade in", c.fadeInMs.toFloat(), 0f..2000f, "${c.fadeInMs} ms") { v -> vm.update(id) { it.copy(fadeInMs = v.toLong() / 50 * 50) } }
             Slide("Fade out", c.fadeOutMs.toFloat(), 0f..2000f, "${c.fadeOutMs} ms") { v -> vm.update(id) { it.copy(fadeOutMs = v.toLong() / 50 * 50) } }
         }
@@ -661,7 +731,7 @@ private fun ToolPanel(
         Tool.Keyframes -> KeyframePanel(vm, c, pos, kfSel, onKfSel)
         Tool.Transition -> TransitionPanel(vm, c)
         Tool.Stickers -> {
-            Text("Tap a sticker to add it. Edit size, position and timing in the Text tool.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+            Text("Tap a sticker to add it. Edit size, position and timing in the Text tool.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
             stickerList.chunked(8).forEach { row ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     row.forEach { e ->
@@ -693,7 +763,7 @@ private fun PreviewStage(vm: EditorViewModel, modifier: Modifier, onAdd: () -> U
     val current = vm.clips.getOrNull(tl.currentIndex)
     val localOutMs = tl.localOutMs()
 
-    BoxWithConstraints(modifier.fillMaxWidth().background(Color(0xFF0A0A0D)), contentAlignment = Alignment.Center) {
+    BoxWithConstraints(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
         val first = vm.clips.firstOrNull()
         val ratio = vm.aspect.ratio ?: first?.let { it.width.toFloat() / it.height.toFloat() }
         val canvasW: Dp
@@ -709,7 +779,15 @@ private fun PreviewStage(vm: EditorViewModel, modifier: Modifier, onAdd: () -> U
         val clipB = vm.clips.firstOrNull { it.id == tl.clipIdB }
         val videoCurrent = current != null && !current.isImage
 
-        Box(Modifier.size(canvasW, canvasH).clipToBounds().background(Color.Black), contentAlignment = Alignment.Center) {
+        val canvasShape = RoundedCornerShape(18.dp)
+        Box(
+            Modifier.size(canvasW, canvasH)
+                .shadow(if (vm.clips.isEmpty()) 0.dp else 22.dp, canvasShape, ambientColor = Pal.violet, spotColor = Pal.cyan)
+                .clip(canvasShape)
+                .background(if (vm.clips.isEmpty()) Color(0x14FFFFFF) else Color.Black)
+                .border(1.dp, Pal.glassBorder, canvasShape),
+            contentAlignment = Alignment.Center
+        ) {
             // Two video layers (double buffer): the active one is drawn with the clip's transform, the other
             // keeps the next clip prepared underneath so clip changes show no black frame.
             ClipFrame(clipA, videoCurrent && tl.activeIsA && current?.id == clipA?.id, canvasW, canvasH, vm.fill, localOutMs) { mod ->
@@ -736,16 +814,20 @@ private fun PreviewStage(vm: EditorViewModel, modifier: Modifier, onAdd: () -> U
             if (current != null) PreviewTextOverlays(current, localOutMs, canvasW, canvasH, vm.outputWidthPx())
 
             if (vm.clips.isEmpty()) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp).zIndex(5f)) {
-                    Text("🎬", fontSize = 44.sp)
-                    Spacer(Modifier.height(8.dp))
-                    Text("Start a new project", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+                    modifier = Modifier.padding(24.dp).zIndex(5f)
+                ) {
+                    EmptyHero(Modifier.size(170.dp))
+                    Spacer(Modifier.height(10.dp))
+                    Text("Create something great", style = MaterialTheme.typography.titleLarge.copy(brush = Pal.accent), fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(4.dp))
                     Text(
-                        "Add videos and photos, then trim, add text, filters, music and export.",
-                        color = Color.Gray, style = MaterialTheme.typography.bodySmall
+                        "Add videos and photos, then trim, style, add music and export in HD. Free, no watermark.",
+                        color = Pal.textLo, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center
                     )
-                    Spacer(Modifier.height(12.dp))
-                    Button(onClick = onAdd, shape = RoundedCornerShape(24.dp)) { Text("＋  Add video or photo") }
+                    Spacer(Modifier.height(16.dp))
+                    GradientButton("＋  Add video or photo", onClick = onAdd, shimmer = true)
                 }
             }
             if (vm.safeZone) {
@@ -756,7 +838,7 @@ private fun PreviewStage(vm: EditorViewModel, modifier: Modifier, onAdd: () -> U
                 Text(
                     "${fmt(vm.timeMs)} / ${fmt(tl.totalMs())}",
                     modifier = Modifier.align(Alignment.BottomStart).padding(8.dp).zIndex(7f)
-                        .background(Color(0x99000000), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp),
+                        .background(Color(0xB30A0919), RoundedCornerShape(10.dp)).padding(horizontal = 8.dp, vertical = 3.dp),
                     style = MaterialTheme.typography.labelSmall, color = Color.White
                 )
             }
@@ -886,7 +968,7 @@ private fun TextPanel(vm: EditorViewModel, c: Clip) {
         }
     }
     if (sel == null) {
-        Text("Add a text layer, or pick one above to edit.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+        Text("Add a text layer, or pick one above to edit.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
         return
     }
     val lid = sel.id
@@ -913,14 +995,14 @@ private fun TextPanel(vm: EditorViewModel, c: Clip) {
             FilterChip(selected = sel.anim == a, onClick = { vm.updateLayer(lid) { it.copy(anim = a) } }, label = { Text(a.label) })
         }
     }
-    Text("The preview follows the timeline, so timing and entry animation show while you play or scrub.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+    Text("The preview follows the timeline, so timing and entry animation show while you play or scrub.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
     Spacer(Modifier.height(6.dp))
 
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         textColors.forEach { col ->
             Box(
                 Modifier.size(30.dp).clip(RoundedCornerShape(15.dp)).background(Color(col))
-                    .border(BorderStroke(if (sel.color == col) 3.dp else 1.dp, if (sel.color == col) MaterialTheme.colorScheme.primary else Color.Gray), RoundedCornerShape(15.dp))
+                    .border(BorderStroke(if (sel.color == col) 3.dp else 1.dp, if (sel.color == col) MaterialTheme.colorScheme.primary else Pal.textLo), RoundedCornerShape(15.dp))
                     .clickable { vm.updateLayer(lid) { it.copy(color = col) } }
             )
         }
@@ -992,14 +1074,14 @@ private fun CanvasPanel(vm: EditorViewModel) {
 private fun TransitionPanel(vm: EditorViewModel, c: Clip) {
     Text(
         "Transition to the next clip: fades this clip out and the next one in (dip through black).",
-        style = MaterialTheme.typography.bodySmall, color = Color.Gray
+        style = MaterialTheme.typography.bodySmall, color = Pal.textLo
     )
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         listOf(0L to "None", 300L to "Quick", 600L to "Medium", 1000L to "Long").forEach { (ms, label) ->
             FilterChip(selected = c.fadeOutMs == ms, onClick = { vm.setTransition(ms) }, label = { Text(label) })
         }
     }
-    Text("Needs a clip after this one. Shows in the exported video. Use Fade for custom lengths.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+    Text("Needs a clip after this one. Shows in the exported video. Use Fade for custom lengths.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
 }
 
 @Composable
@@ -1008,7 +1090,7 @@ private fun KeyframePanel(vm: EditorViewModel, c: Clip, pos: Long, sel: Int, onS
     val secs = c.outputMs / 1000f
     Text(
         "Move the playhead, add a keyframe, then change its values. The clip animates between keyframes in the exported video. Scrub the playhead to preview a keyframe.",
-        style = MaterialTheme.typography.bodySmall, color = Color.Gray
+        style = MaterialTheme.typography.bodySmall, color = Pal.textLo
     )
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         Button(onClick = { vm.addKeyframe(frac); onSel(c.keyframes.size) }) { Text("◆ Add keyframe") }
@@ -1057,7 +1139,7 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
     }
     Text(
         "Voice recording starts from the selected clip and plays your video. Use headphones to avoid echo. Up to 4 audio tracks.",
-        style = MaterialTheme.typography.bodySmall, color = Color.Gray
+        style = MaterialTheme.typography.bodySmall, color = Pal.textLo
     )
     val total = (vm.totalMs / 1000f).coerceAtLeast(1f)
     vm.audioTracks.forEach { t ->
@@ -1087,7 +1169,7 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
         }
     }
     if (vm.audioTracks.isEmpty()) {
-        Text("No audio yet. Add music or record your voice.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+        Text("No audio yet. Add music or record your voice.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
     }
 }
 
