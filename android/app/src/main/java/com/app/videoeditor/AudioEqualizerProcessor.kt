@@ -29,7 +29,9 @@ class AudioEqualizerProcessor(
 
     /** Safe to call while playback is running; coefficients are refreshed on the audio thread. */
     fun setGainsDb(gainsDb: List<Float>) {
-        requestedGainsDb = normalizeGains(gainsDb)
+        val normalized = normalizeGains(gainsDb)
+        if (normalized == requestedGainsDb) return
+        requestedGainsDb = normalized
         rebuildFilters()
     }
 
@@ -76,14 +78,12 @@ class AudioEqualizerProcessor(
     }
 
     private fun rebuildFilters() {
-        val format = inputAudioFormat
-        if (format == AudioProcessor.AudioFormat.NOT_SET) return
-        filtersByChannel = if (requestedGainsDb.all { it == 0f }) {
-            emptyArray()
-        } else {
-            Array(format.channelCount.coerceAtLeast(1)) {
-                createFilters(format.sampleRate, requestedGainsDb)
-            }
+        val sampleRate = configuredSampleRate
+        val channels = configuredChannelCount
+        if (sampleRate <= 0 || channels <= 0) return
+        val gains = requestedGainsDb
+        filtersByChannel = if (gains.all { it == 0f }) emptyArray() else {
+            Array(channels) { createFilters(sampleRate, gains) }
         }
     }
 
