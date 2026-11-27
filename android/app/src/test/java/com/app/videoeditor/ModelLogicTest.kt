@@ -133,6 +133,13 @@ class ModelLogicTest {
     }
 
     @Test
+    fun audioGainKeyframesUseSortedBinarySearchInterpolation() {
+        val points = listOf(AudioGainPoint(0L, 0f), AudioGainPoint(1_000L, 2f), AudioGainPoint(2_000L, 1f))
+        assertEquals(1f, audioKeyframeGainAt(points, 500L), 0.0001f)
+        assertEquals(1.5f, audioKeyframeGainAt(points, 1_500L), 0.0001f)
+    }
+
+    @Test
     fun emptyAudioGainKeyframesKeepUnityGain() {
         assertEquals(1f, audioKeyframeGainAt(emptyList(), 500L), 0.0001f)
     }

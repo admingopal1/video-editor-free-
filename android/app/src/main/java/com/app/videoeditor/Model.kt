@@ -59,15 +59,19 @@ fun audioFadeGainAt(elapsedMs: Long, durationMs: Long, fadeInMs: Long, fadeOutMs
     return minOf(fadeInGain, fadeOutGain)
 }
 
+/** Points must be sorted by time; project loading and editing normalize this once. */
 fun audioKeyframeGainAt(points: List<AudioGainPoint>, elapsedMs: Long): Float {
-    val sorted = points.sortedBy { it.timeMs }
-    if (sorted.isEmpty()) return 1f
-    if (elapsedMs < sorted.first().timeMs) return 1f
-    if (elapsedMs == sorted.first().timeMs) return sorted.first().gain.coerceIn(0f, 2f)
-    if (elapsedMs >= sorted.last().timeMs) return sorted.last().gain.coerceIn(0f, 2f)
-    val i = sorted.indexOfLast { it.timeMs <= elapsedMs }
-    val a = sorted[i]
-    val b = sorted[i + 1]
+    if (points.isEmpty()) return 1f
+    if (elapsedMs < points.first().timeMs) return 1f
+    if (elapsedMs >= points.last().timeMs) return points.last().gain.coerceIn(0f, 2f)
+    var low = 0
+    var high = points.lastIndex
+    while (low <= high) {
+        val mid = (low + high) ushr 1
+        if (points[mid].timeMs <= elapsedMs) low = mid + 1 else high = mid - 1
+    }
+    val a = points[high.coerceAtLeast(0)]
+    val b = points[low.coerceAtMost(points.lastIndex)]
     val span = (b.timeMs - a.timeMs).coerceAtLeast(1L)
     val fraction = (elapsedMs - a.timeMs).toFloat() / span
     return (a.gain + (b.gain - a.gain) * fraction).coerceIn(0f, 2f)
@@ -99,7 +103,7 @@ fun buildVoiceDuckingPoints(
                 val peaks = waveforms[voice.id]
                 val sourceMs = voice.trimStartMs + elapsed
                 val index = (sourceMs / stepMs).toInt()
-                peaks != null && index in peaks.indices && peaks[index] >= speechThreshold
+                peaks != null && sourceMs < voice.trimEndMs && index in peaks.indices && peaks[index] >= speechThreshold
             }
         }
         val target = if (speechActive) duckGain.coerceIn(0f, 1f) else 1f
@@ -303,7 +307,7 @@ fun audioFromJson(o: JSONObject): AudioTrack = AudioTrack(
     trimEndMs = normalizedAudioTrimEndMs(if (o.has("trimEnd")) o.optLong("trimEnd") else null, o.optLong("trim", 0L)),
     fadeInMs = o.optLong("fadeIn", 0L).coerceAtLeast(0L),
     fadeOutMs = o.optLong("fadeOut", 0L).coerceAtLeast(0L),
-    gainPoints = (o.optJSONArray("gainPoints")?.let { a -> (0 until a.length()).mapNotNull { i -> a.optJSONObject(i)?.let { AudioGainPoint(it.optLong("time", 0L).coerceAtLeast(0L), it.optDouble("gain", 1.0).toFloat().coerceIn(0f, 2f)) } } } ?: emptyList()),
+    gainPoints = (o.optJSONArray("gainPoints")?.let { a -> (0 until a.length()).mapNotNull { i -> a.optJSONObject(i)?.let { AudioGainPoint(it.optLong("time", 0L).coerceAtLeast(0L), it.optDouble("gain", 1.0).toFloat().coerceIn(0f, 2f)) } } } ?: emptyList()).sortedBy { it.timeMs },
     isVoiceover = o.optBoolean("voiceover", false),
     autoDuck = o.optBoolean("autoDuck", false)
 )
