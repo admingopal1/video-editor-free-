@@ -397,11 +397,12 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                     dropped++
                     continue
                 }
-                if (!canOpen(overlay.uri)) {
+                val overlayUri = Uri.parse(overlay.uriString)
+                if (!canOpen(overlayUri)) {
                     dropped++
                     continue
                 }
-                if (overlay.isImage && decodeBitmap(overlay.uri, 320) == null) {
+                if (overlay.isImage && decodeBitmap(overlayUri, 320) == null) {
                     dropped++
                     continue
                 }
