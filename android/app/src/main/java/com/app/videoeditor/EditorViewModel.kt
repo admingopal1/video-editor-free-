@@ -79,6 +79,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     var bitrateLevel by mutableStateOf(0)   // 0 auto, 1 balanced, 2 high, 3 max
     var safeZone by mutableStateOf(false)
     var audioTracks by mutableStateOf(listOf<AudioTrack>()); private set
+    /** Secondary visual layers; persisted separately so the primary clip track remains backward-compatible. */
+    var overlayClips by mutableStateOf(listOf<OverlayClip>()); private set
     var recording by mutableStateOf(false); private set
     val waves = mutableStateMapOf<String, FloatArray>()
     private val waveLoading = mutableSetOf<String>()
@@ -123,6 +125,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private data class EditorSnapshot(
         val clips: List<Clip>,
         val audioTracks: List<AudioTrack>,
+        val overlayClips: List<OverlayClip>,
         val aspect: Aspect,
         val quality: Int,
         val fill: Boolean,
@@ -139,6 +142,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private fun snapshot(): EditorSnapshot = EditorSnapshot(
         clips = clips.toList(),
         audioTracks = audioTracks.toList(),
+        overlayClips = overlayClips.toList(),
         aspect = aspect,
         quality = quality,
         fill = fill,
@@ -149,6 +153,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private fun restore(snapshot: EditorSnapshot) {
         clips = snapshot.clips
         audioTracks = snapshot.audioTracks
+        overlayClips = snapshot.overlayClips
         aspect = snapshot.aspect
         quality = snapshot.quality
         fill = snapshot.fill
@@ -243,7 +248,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             val target = projects.firstOrNull { it.id == last }?.id ?: projects.firstOrNull()?.id
             if (target == null || !loadInto(target)) { startEmpty("My project"); saveNow() }
             snapshotFlow {
-                listOf<Any?>(clips, audioTracks, aspect, quality, fill, fps, bitrateLevel, projectName)
+                listOf<Any?>(clips, audioTracks, overlayClips, aspect, quality, fill, fps, bitrateLevel, projectName)
             }.debounce(600).collect { saveNow() }
         }
     }
@@ -266,6 +271,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         o.put("name", projectName); o.put("updated", System.currentTimeMillis())
         o.put("clips", JSONArray().apply { clips.forEach { put(it.toJson()) } })
         o.put("audio", JSONArray().apply { audioTracks.forEach { put(it.toJson()) } })
+        o.put("overlayClips", JSONArray().apply { overlayClips.forEach { put(it.toJson()) } })
         o.put("aspect", aspect.name); o.put("quality", quality); o.put("fill", fill)
         o.put("fps", fps); o.put("bitrate", bitrateLevel)
         return o.toString()
@@ -336,7 +342,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun projectThumb(id: String): Bitmap? = BitmapFactory.decodeFile(File(projectsDir, "$id.jpg").path)
 
-    private class Loaded(val o: JSONObject, val clips: List<Clip>, val thumbs: Map<Long, Bitmap>, val dropped: Int, val audio: List<AudioTrack>)
+    private class Loaded(val o: JSONObject, val clips: List<Clip>, val thumbs: Map<Long, Bitmap>, val dropped: Int, val audio: List<AudioTrack>, val overlays: List<OverlayClip>)
 
     private fun canOpen(uri: Uri): Boolean = try {
         ctx.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
@@ -381,7 +387,26 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                 if (canOpen(u)) tracks += AudioTrack(900_000L, u, displayName(u), o.optDouble("musicVolume", 1.0).toFloat(), loop = true)
             }
         }
-        Loaded(o, list, th, dropped, tracks)
+        val overlays = mutableListOf<OverlayClip>()
+        val overlayArray = o.optJSONArray("overlayClips")
+        if (overlayArray != null) {
+            for (i in 0 until overlayArray.length()) {
+                val overlay = overlayClipFromJson(overlayArray.optJSONObject(i) ?: continue) ?: run {
+                    dropped++
+                    continue
+                }
+                if (!canOpen(overlay.uri)) {
+                    dropped++
+                    continue
+                }
+                if (overlay.isImage && decodeBitmap(overlay.uri, 320) == null) {
+                    dropped++
+                    continue
+                }
+                overlays += overlay
+            }
+        }
+        Loaded(o, list, th, dropped, tracks, overlays)
     }.getOrNull()
 
     private fun resetPlayback() {
@@ -403,11 +428,13 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         clips = l.clips
         nextId = maxOf(
             (clips.maxOfOrNull { c -> maxOf(c.id, c.layers.maxOfOrNull { it.id } ?: 0L) } ?: 0L),
-            l.audio.maxOfOrNull { it.id } ?: 0L
+            l.audio.maxOfOrNull { it.id } ?: 0L,
+            l.overlays.maxOfOrNull { it.id } ?: 0L
         ) + 1
         selectedId = clips.firstOrNull()?.id
         selectedLayerId = null
         audioTracks = l.audio
+        overlayClips = l.overlays
         aspect = runCatching { Aspect.valueOf(l.o.getString("aspect")) }.getOrDefault(Aspect.Original)
         quality = l.o.optInt("quality", 720); fill = l.o.optBoolean("fill", false)
         fps = l.o.optInt("fps", 0); bitrateLevel = l.o.optInt("bitrate", 0)
@@ -435,7 +462,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         projectId = System.currentTimeMillis().toString()
         projectName = name
         thumbs.clear(); undoStack.clear(); redoStack.clear(); undoCount = 0; redoCount = 0
-        clips = emptyList(); selectedId = null; selectedLayerId = null; audioTracks = emptyList()
+        clips = emptyList(); selectedId = null; selectedLayerId = null; audioTracks = emptyList(); overlayClips = emptyList()
         prefs.edit().putString("current", projectId).apply()
     }
 
