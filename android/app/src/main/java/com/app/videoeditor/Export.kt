@@ -3,10 +3,17 @@
 package com.app.videoeditor
 
 import android.content.Context
+import android.graphics.Canvas
 import android.graphics.Matrix
+import android.graphics.Paint
 import android.graphics.Typeface
 import android.net.Uri
+import android.text.Layout
 import android.text.SpannableString
+import android.text.TextPaint
+import android.text.style.AlignmentSpan
+import android.text.style.CharacterStyle
+import android.text.style.ReplacementSpan
 import android.text.Spanned
 import android.text.style.AbsoluteSizeSpan
 import android.text.style.BackgroundColorSpan
@@ -67,21 +74,10 @@ private fun animEffect(c: Clip): Effect? {
     val tb = TimeBase()
     return object : MatrixTransformation {
         override fun getMatrix(presentationTimeUs: Long): Matrix {
-            val r = tb.rel(presentationTimeUs)
-            val f = (r.toFloat() / total).coerceIn(0f, 1f)
+            val xf = Motion.anim(c.anim, tb.rel(presentationTimeUs), total)
             val m = Matrix()
-            when (c.anim) {
-                Anim.ZoomIn -> { val s = 1f + 0.25f * f; m.postScale(s, s) }
-                Anim.ZoomOut -> { val s = 1.25f - 0.25f * f; m.postScale(s, s) }
-                Anim.PanLeft -> { m.postScale(1.2f, 1.2f); m.postTranslate(0.18f * (1f - 2f * f), 0f) }
-                Anim.PanRight -> { m.postScale(1.2f, 1.2f); m.postTranslate(-0.18f * (1f - 2f * f), 0f) }
-                Anim.Pulse -> {
-                    val sec = r / 1_000_000f
-                    val s = 1f + 0.05f * sin(2.0 * PI * sec).toFloat()
-                    m.postScale(s, s)
-                }
-                Anim.None -> {}
-            }
+            m.postScale(xf.scale, xf.scale)
+            m.postTranslate(xf.dx, 0f)
             return m
         }
     }
@@ -97,15 +93,8 @@ private fun diagMatrix(o: Float): FloatArray {
     )
 }
 
-private fun frameAspect(c: Clip): Float {
-    var w = c.width * (1f - c.cropL - c.cropR)
-    var h = c.height * (1f - c.cropT - c.cropB)
-    if (c.rotation == 90 || c.rotation == 270) { val t = w; w = h; h = t }
-    return (w / h.coerceAtLeast(1f)).coerceIn(0.2f, 5f)
-}
-
 private fun kfMatrix(c: Clip, k: Keyframe): Matrix {
-    val a = frameAspect(c)
+    val a = c.frameAspect()
     val m = Matrix()
     m.postScale(k.scale, k.scale)
     if (k.rotation != 0f) {
@@ -159,21 +148,36 @@ private fun fadeEffect(c: Clip): Effect? {
     val outUs = c.fadeOutMs * 1000L
     val tb = TimeBase()
     return object : RgbMatrix {
-        override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray {
-            val t = tb.rel(presentationTimeUs)
-            var f = 1f
-            if (inUs > 0 && t < inUs) f = t.toFloat() / inUs
-            if (outUs > 0 && t > total - outUs) f = minOf(f, (total - t).toFloat() / outUs)
-            f = f.coerceIn(0f, 1f)
-            return floatArrayOf(
-                f, 0f, 0f, 0f,
-                0f, f, 0f, 0f,
-                0f, 0f, f, 0f,
-                0f, 0f, 0f, 1f
-            )
-        }
+        override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray =
+            diagMatrix(Motion.fade(inUs, outUs, total, tb.rel(presentationTimeUs)))
     }
 }
+
+/** Soft drop shadow behind the text. */
+private class ShadowSpan : CharacterStyle() {
+    override fun updateDrawState(tp: TextPaint) {
+        tp.setShadowLayer(8f, 4f, 4f, 0xCC000000.toInt())
+    }
+}
+
+/** Draws the text twice: a dark stroke first, then the normal fill on top. */
+private class OutlineSpan(private val strokeColor: Int, private val strokeWidth: Float) : ReplacementSpan() {
+    override fun getSize(paint: Paint, text: CharSequence, start: Int, end: Int, fm: Paint.FontMetricsInt?): Int =
+        Math.ceil((paint.measureText(text, start, end) + strokeWidth).toDouble()).toInt()
+
+    override fun draw(canvas: Canvas, text: CharSequence, start: Int, end: Int, x: Float, top: Int, y: Int, bottom: Int, paint: Paint) {
+        val stroke = Paint(paint)
+        stroke.style = Paint.Style.STROKE
+        stroke.strokeWidth = strokeWidth
+        stroke.strokeJoin = Paint.Join.ROUND
+        stroke.color = strokeColor
+        canvas.drawText(text, start, end, x + strokeWidth / 2f, y.toFloat(), stroke)
+        canvas.drawText(text, start, end, x + strokeWidth / 2f, y.toFloat(), paint)
+    }
+}
+
+/** Stroke width (in text-bitmap pixels) of the outline style; the preview scales it the same way. */
+const val OUTLINE_PX = 8f
 
 private fun styledText(t: TextLayer): SpannableString {
     val s = SpannableString(t.text)
@@ -184,78 +188,54 @@ private fun styledText(t: TextLayer): SpannableString {
     s.setSpan(TypefaceSpan(FONT_NAMES[t.font.coerceIn(0, FONT_NAMES.lastIndex)]), 0, n, flag)
     if (t.bold) s.setSpan(StyleSpan(Typeface.BOLD), 0, n, flag)
     if (t.background) s.setSpan(BackgroundColorSpan(0xB3000000.toInt()), 0, n, flag)
+    if (t.shadow) s.setSpan(ShadowSpan(), 0, n, flag)
+    if (t.outline) s.setSpan(OutlineSpan(0xFF000000.toInt(), OUTLINE_PX), 0, n, flag)
+    val alignment = when (t.align) {
+        0 -> Layout.Alignment.ALIGN_NORMAL
+        2 -> Layout.Alignment.ALIGN_OPPOSITE
+        else -> Layout.Alignment.ALIGN_CENTER
+    }
+    s.setSpan(AlignmentSpan.Standard(alignment), 0, n, flag)
     return s
 }
 
-/** Text that only shows between startFrac..endFrac of the clip and can animate in (export only). */
+/** Time-aware text overlay for export. Preview uses the same textRender() maths. */
 private fun timedOverlay(c: Clip, t: TextLayer): TextureOverlay {
     val text = styledText(t)
     val total = (c.outputMs * 1000L).coerceAtLeast(1L)
-    val startUs = (t.startFrac * total).toLong()
-    val endUs = (t.endFrac * total).toLong()
-    val animUs = 400_000L
     val tb = TimeBase()
     return object : TextOverlay() {
         override fun getText(presentationTimeUs: Long): SpannableString = text
 
         override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings {
-            val r = tb.rel(presentationTimeUs)
-            val visible = r in startUs..endUs
-            var alpha = if (visible) 1f else 0f
-            var scale = t.scale
-            var y = t.y
-            if (visible) {
-                val a = ((r - startUs).toFloat() / animUs).coerceIn(0f, 1f)
-                when (t.anim) {
-                    TextAnim.Fade -> alpha = a
-                    TextAnim.Pop -> scale = t.scale * (0.5f + 0.5f * a)
-                    TextAnim.SlideUp -> y = t.y - 0.25f * (1f - a)
-                    TextAnim.None -> {}
-                }
-            }
+            val r = textRender(t, total, tb.rel(presentationTimeUs))
             return OverlaySettings.Builder()
-                .setBackgroundFrameAnchor(t.x, y)
-                .setScale(scale, scale)
-                .setAlphaScale(alpha)
+                .setBackgroundFrameAnchor(t.x, r.y)
+                .setRotationDegrees(t.rotation)
+                .setScale(r.scale, r.scale)
+                .setAlphaScale(if (r.visible) r.alpha else 0f)
                 .build()
         }
     }
 }
 
-private fun textOverlays(c: Clip, forExport: Boolean): List<TextureOverlay> =
+private fun textOverlays(c: Clip): List<TextureOverlay> =
     c.layers.filter { it.text.isNotBlank() }.map { t ->
-        if (forExport && (t.startFrac > 0f || t.endFrac < 1f || t.anim != TextAnim.None)) {
+        if (t.startFrac > 0f || t.endFrac < 1f || t.anim != TextAnim.None) {
             timedOverlay(c, t)
         } else {
             TextOverlay.createStaticTextOverlay(
                 styledText(t),
                 OverlaySettings.Builder()
                     .setBackgroundFrameAnchor(t.x, t.y)
+                    .setRotationDegrees(t.rotation)
                     .setScale(t.scale, t.scale)
                     .build()
             )
         }
     }
 
-/** Visual effects for one clip. Time-based effects (animation, fade) and speed are export-only. */
-fun buildVideoEffects(c: Clip, presentation: Presentation?, forExport: Boolean, fps: Int = 0, kfFrac: Float = -1f): List<Effect> {
-    val l = mutableListOf<Effect>()
-    if (forExport && c.speed != 1f && !c.isImage) l += SpeedChangeEffect(c.speed)
-
-    if (c.cropL > 0f || c.cropR > 0f || c.cropT > 0f || c.cropB > 0f) {
-        l += Crop(-1f + 2f * c.cropL, 1f - 2f * c.cropR, -1f + 2f * c.cropB, 1f - 2f * c.cropT)
-    }
-    if (c.rotation != 0 || c.flipH || c.flipV || c.zoom != 1f) {
-        val sx = if (c.flipH) -c.zoom else c.zoom
-        val sy = if (c.flipV) -c.zoom else c.zoom
-        l += ScaleAndRotateTransformation.Builder()
-            .setRotationDegrees(c.rotation.toFloat())
-            .setScale(sx, sy)
-            .build()
-    }
-    if (forExport) animEffect(c)?.let { l += it }
-    l += kfEffects(c, kfFrac, forExport)
-
+private fun addColorEffects(l: MutableList<Effect>, c: Clip) {
     if (c.brightness != 0f) l += Brightness(c.brightness)
     if (c.contrast != 0f) l += Contrast(c.contrast)
     if (c.saturation != 0f || c.hue != 0f) {
@@ -298,11 +278,46 @@ fun buildVideoEffects(c: Clip, presentation: Presentation?, forExport: Boolean, 
             l += Contrast(0.2f)
         }
     }
+}
+
+/**
+ * GL effects used by the live preview: crop, colour adjustments and filter. Geometry, motion, fades and
+ * text are drawn by Compose from the shared PreviewMath so they follow the timeline clock exactly.
+ */
+fun buildPreviewGlEffects(c: Clip): List<Effect> {
+    val l = mutableListOf<Effect>()
+    if (c.cropL > 0f || c.cropR > 0f || c.cropT > 0f || c.cropB > 0f) {
+        l += Crop(-1f + 2f * c.cropL, 1f - 2f * c.cropR, -1f + 2f * c.cropB, 1f - 2f * c.cropT)
+    }
+    addColorEffects(l, c)
+    return l
+}
+
+/** Visual effects for one clip. Time-based effects (animation, fade) and speed are export-only. */
+fun buildVideoEffects(c: Clip, presentation: Presentation?, forExport: Boolean, fps: Int = 0, kfFrac: Float = -1f): List<Effect> {
+    val l = mutableListOf<Effect>()
+    if (forExport && c.speed != 1f && !c.isImage) l += SpeedChangeEffect(c.speed)
+
+    if (c.cropL > 0f || c.cropR > 0f || c.cropT > 0f || c.cropB > 0f) {
+        l += Crop(-1f + 2f * c.cropL, 1f - 2f * c.cropR, -1f + 2f * c.cropB, 1f - 2f * c.cropT)
+    }
+    if (c.rotation != 0 || c.flipH || c.flipV || c.zoom != 1f) {
+        val sx = if (c.flipH) -c.zoom else c.zoom
+        val sy = if (c.flipV) -c.zoom else c.zoom
+        l += ScaleAndRotateTransformation.Builder()
+            .setRotationDegrees(c.rotation.toFloat())
+            .setScale(sx, sy)
+            .build()
+    }
+    if (forExport) animEffect(c)?.let { l += it }
+    l += kfEffects(c, kfFrac, forExport)
+
+    addColorEffects(l, c)
     if (forExport) fadeEffect(c)?.let { l += it }
     if (forExport && fps > 0) l += FrameDropEffect.createDefaultFrameDropEffect(fps.toFloat())
     if (presentation != null) l += presentation
 
-    val overlays = textOverlays(c, forExport)
+    val overlays = textOverlays(c)
     if (overlays.isNotEmpty()) l += OverlayEffect(ImmutableList.copyOf<TextureOverlay>(overlays))
     return l
 }

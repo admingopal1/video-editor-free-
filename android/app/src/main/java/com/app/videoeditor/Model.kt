@@ -36,6 +36,17 @@ data class AudioTrack(
     val loop: Boolean = false
 )
 
+fun trimmedDurationMs(startMs: Long, endMs: Long): Long = (endMs - startMs).coerceAtLeast(0L)
+
+fun shouldDeleteStaleExportFile(fileName: String, lastModifiedMs: Long, cutoffMs: Long): Boolean =
+    fileName.startsWith("export_") && lastModifiedMs < cutoffMs
+
+fun outputDurationMs(startMs: Long, endMs: Long, speed: Float): Long {
+    val trimmed = trimmedDurationMs(startMs, endMs)
+    if (speed <= 0f || speed.isNaN() || speed.isInfinite()) return 0L
+    return (trimmed / speed).toLong()
+}
+
 fun interpKeyframes(kfs: List<Keyframe>, t: Float): Keyframe {
     if (kfs.isEmpty()) return Keyframe(t)
     if (t <= kfs.first().t) return kfs.first().copy(t = t)
@@ -73,7 +84,11 @@ data class TextLayer(
     val font: Int = 0,
     val startFrac: Float = 0f,
     val endFrac: Float = 1f,
-    val anim: TextAnim = TextAnim.None
+    val anim: TextAnim = TextAnim.None,
+    val rotation: Float = 0f,          // degrees, counter-clockwise
+    val shadow: Boolean = false,
+    val outline: Boolean = false,
+    val align: Int = 1                 // 0 left, 1 centre, 2 right (matters for multi-line text)
 )
 
 data class ProjectInfo(val id: String, val name: String, val updated: Long, val clipCount: Int, val durationMs: Long)
@@ -110,8 +125,8 @@ data class Clip(
     val layers: List<TextLayer> = emptyList(),
     val keyframes: List<Keyframe> = emptyList()
 ) {
-    val trimmedMs: Long get() = endMs - startMs
-    val outputMs: Long get() = (trimmedMs / speed).toLong()
+    val trimmedMs: Long get() = trimmedDurationMs(startMs, endMs)
+    val outputMs: Long get() = outputDurationMs(startMs, endMs, speed)
 }
 
 sealed class ExportState {
@@ -145,6 +160,7 @@ fun Clip.toJson(): JSONObject = JSONObject().apply {
                 put("id", l.id); put("text", l.text); put("color", l.color); put("scale", l.scale.toDouble())
                 put("x", l.x.toDouble()); put("y", l.y.toDouble()); put("bold", l.bold)
                 put("bg", l.background); put("font", l.font)
+                put("rot", l.rotation.toDouble()); put("shadow", l.shadow); put("outline", l.outline); put("align", l.align)
                 put("sf", l.startFrac.toDouble()); put("ef", l.endFrac.toDouble()); put("anim", l.anim.name)
             })
         }
@@ -161,6 +177,8 @@ fun clipFromJson(o: JSONObject): Clip {
             scale = l.optDouble("scale", 1.0).toFloat(), x = l.optDouble("x", 0.0).toFloat(),
             y = l.optDouble("y", 0.6).toFloat(), bold = l.optBoolean("bold", true),
             background = l.optBoolean("bg", false), font = l.optInt("font", 0),
+            rotation = l.optDouble("rot", 0.0).toFloat(), shadow = l.optBoolean("shadow", false),
+            outline = l.optBoolean("outline", false), align = l.optInt("align", 1),
             startFrac = l.optDouble("sf", 0.0).toFloat(), endFrac = l.optDouble("ef", 1.0).toFloat(),
             anim = runCatching { TextAnim.valueOf(l.getString("anim")) }.getOrDefault(TextAnim.None)
         )

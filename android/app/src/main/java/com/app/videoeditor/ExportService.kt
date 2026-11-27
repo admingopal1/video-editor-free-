@@ -20,6 +20,17 @@ import androidx.core.content.ContextCompat
 class ExportService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /**
+     * Android 15+ can time-limit mediaProcessing foreground services.
+     * Notify the editor so it cancels the in-process Transformer, then stop promptly.
+     */
+    override fun onTimeout(startId: Int, foregroundServiceType: Int) {
+        runCatching {
+            sendBroadcast(Intent(ACTION_TIMEOUT).setPackage(packageName))
+        }
+        stopSelf(startId)
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         ensureChannel(this)
         val n = build(this, 0, "Exporting video…")
@@ -39,6 +50,7 @@ class ExportService : Service() {
         private const val ID = 4711
         private const val DONE_ID = 4712
         private const val CHANNEL = "export"
+        const val ACTION_TIMEOUT = "com.app.videoeditor.action.EXPORT_SERVICE_TIMEOUT"
 
         private fun ensureChannel(ctx: Context) {
             val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -68,7 +80,7 @@ class ExportService : Service() {
             } catch (e: Exception) { }
         }
 
-        fun stop(ctx: Context, finishedText: String? = null) {
+        fun stop(ctx: Context, finishedText: String? = null, isError: Boolean = false) {
             try { ctx.stopService(Intent(ctx, ExportService::class.java)) } catch (e: Exception) { }
             if (finishedText != null) {
                 try {
@@ -77,7 +89,7 @@ class ExportService : Service() {
                     nm.notify(
                         DONE_ID,
                         NotificationCompat.Builder(ctx, CHANNEL)
-                            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+                            .setSmallIcon(if (isError) android.R.drawable.stat_notify_error else android.R.drawable.stat_sys_upload_done)
                             .setContentTitle("Video Editor")
                             .setContentText(finishedText)
                             .setAutoCancel(true)

@@ -3,8 +3,11 @@
 package com.app.videoeditor
 
 import android.app.Application
+import android.content.BroadcastReceiver
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
@@ -17,6 +20,8 @@ import android.os.StatFs
 import android.os.SystemClock
 import android.provider.MediaStore
 import android.widget.Toast
+import androidx.core.content.ContextCompat
+import android.util.AtomicFile
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -40,9 +45,12 @@ import androidx.media3.transformer.Transformer
 import androidx.media3.transformer.VideoEncoderSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -78,33 +86,81 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private var recordFile: File? = null
     private var recordOffsetMs = 0L
     var export by mutableStateOf<ExportState>(ExportState.Idle)
-    var previewBitmap by mutableStateOf<Bitmap?>(null); private set
-    var previewAll by mutableStateOf(false); private set
     val thumbs = mutableStateMapOf<Long, Bitmap>()
 
-    val player: ExoPlayer = ExoPlayer.Builder(ctx).build()
     private var nextId = 1L
-    private var previewKey: Triple<Long, Long, Long>? = null
-    private var previewImageId = -1L
-    private var pendingSeek = -1L
-    private var playlist: List<Clip> = emptyList()
+
+    /** Live preview of the whole project timeline (double-buffered players + photo clock). */
+    val timeline = TimelinePlayer(
+        ctx, viewModelScope,
+        clipsProvider = { clips },
+        audioProvider = { audioTracks },
+        onClipChanged = { c -> if (selectedId != c.id) selectedId = c.id },
+        decodePhoto = { c -> withContext(Dispatchers.IO) { decodeBitmap(c.uri, 1600) } }
+    )
     private var transformer: Transformer? = null
+    private val exportTracker = ExportRequestTracker()
+    private var exportFile: File? = null
+    private var exportTimeoutReceiverRegistered = false
+
+    private val exportTimeoutReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != ExportService.ACTION_TIMEOUT || export !is ExportState.Running) return
+            // Do not report success: Android has ended the foreground-service time window.
+            exportTracker.cancel()
+            abandonExport(immediate = false)
+            export = ExportState.Failed(
+                "Android stopped this background export after its time limit. Reopen the app and try a shorter export."
+            )
+            ExportService.stop(ctx, "Export stopped: Android's background time limit was reached. Open the app and try again.", isError = true)
+        }
+    }
 
     val selected: Clip? get() = clips.firstOrNull { it.id == selectedId }
     val totalMs: Long get() = clips.sumOf { it.outputMs }
 
-    // ---------- undo / redo ----------
-    private val undoStack = ArrayDeque<List<Clip>>()
-    private val redoStack = ArrayDeque<List<Clip>>()
+    // ---------- complete project undo / redo ----------
+    private data class EditorSnapshot(
+        val clips: List<Clip>,
+        val audioTracks: List<AudioTrack>,
+        val aspect: Aspect,
+        val quality: Int,
+        val fill: Boolean,
+        val fps: Int,
+        val bitrateLevel: Int
+    )
+
+    private val undoStack = ArrayDeque<EditorSnapshot>()
+    private val redoStack = ArrayDeque<EditorSnapshot>()
     var undoCount by mutableIntStateOf(0); private set
     var redoCount by mutableIntStateOf(0); private set
     private var lastRecord = 0L
 
+    private fun snapshot(): EditorSnapshot = EditorSnapshot(
+        clips = clips.toList(),
+        audioTracks = audioTracks.toList(),
+        aspect = aspect,
+        quality = quality,
+        fill = fill,
+        fps = fps,
+        bitrateLevel = bitrateLevel
+    )
+
+    private fun restore(snapshot: EditorSnapshot) {
+        clips = snapshot.clips
+        audioTracks = snapshot.audioTracks
+        aspect = snapshot.aspect
+        quality = snapshot.quality
+        fill = snapshot.fill
+        fps = snapshot.fps
+        bitrateLevel = snapshot.bitrateLevel
+        fixSelection()
+    }
+
     private fun record(force: Boolean = false) {
-        leavePlayAll()
         val now = SystemClock.uptimeMillis()
         if (force || now - lastRecord > 800) {
-            undoStack.addLast(clips)
+            undoStack.addLast(snapshot())
             if (undoStack.size > 60) undoStack.removeFirst()
             redoStack.clear()
         }
@@ -113,33 +169,73 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun fixSelection() {
-        leavePlayAll()
         if (clips.none { it.id == selectedId }) selectedId = clips.firstOrNull()?.id
-        if (clips.isEmpty()) { previewKey = null; previewImageId = -1L; previewBitmap = null; player.clearMediaItems() }
+        if (clips.isEmpty()) timeline.reset() else timeline.refresh()
         undoCount = undoStack.size; redoCount = redoStack.size
         lastRecord = 0L
     }
 
     fun undo() {
         if (undoStack.isEmpty()) return
-        redoStack.addLast(clips); clips = undoStack.removeLast(); fixSelection()
+        redoStack.addLast(snapshot())
+        restore(undoStack.removeLast())
     }
 
     fun redo() {
         if (redoStack.isEmpty()) return
-        undoStack.addLast(clips); clips = redoStack.removeLast(); fixSelection()
+        undoStack.addLast(snapshot())
+        restore(redoStack.removeLast())
+    }
+
+    fun changeAspect(value: Aspect) {
+        if (aspect == value) return
+        record(true)
+        aspect = value
+    }
+
+    fun changeQuality(value: Int) {
+        if (quality == value) return
+        record(true)
+        quality = value
+    }
+
+    fun changeFill(value: Boolean) {
+        if (fill == value) return
+        record(true)
+        fill = value
+    }
+
+    fun changeFps(value: Int) {
+        if (fps == value) return
+        record(true)
+        fps = value
+    }
+
+    fun changeBitrateLevel(value: Int) {
+        if (bitrateLevel == value) return
+        record(true)
+        bitrateLevel = value
     }
 
     // ---------- init: load last project, autosave ----------
     init {
-        player.addListener(object : Player.Listener {
-            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                if (previewAll) syncPlaylistItem()
-            }
-        })
+        ContextCompat.registerReceiver(
+            ctx,
+            exportTimeoutReceiver,
+            IntentFilter(ExportService.ACTION_TIMEOUT),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        exportTimeoutReceiverRegistered = true
+
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                ctx.cacheDir.listFiles { f -> f.name.startsWith("export_") || f.name.startsWith("silence_") }?.forEach { it.delete() }
+                // Keep recent exports intact; remove only abandoned temporary exports.
+                val staleExportBefore = System.currentTimeMillis() - 24L * 60L * 60L * 1000L
+                ctx.cacheDir.listFiles { f -> f.name.startsWith("export_") }?.forEach { file ->
+                    if (shouldDeleteStaleExportFile(file.name, file.lastModified(), staleExportBefore)) file.delete()
+                }
+                // Silence files are short-lived intermediate assets and can be cleared on startup.
+                ctx.cacheDir.listFiles { f -> f.name.startsWith("silence_") }?.forEach { it.delete() }
                 migrateOldProject()
             }
             refreshProjects()
@@ -175,18 +271,49 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         return o.toString()
     }
 
+    private val projectSaveMutex = Mutex()
+
     private suspend fun saveNow() {
-        val id = projectId
-        if (id.isEmpty()) return
-        val json = serialize()
-        val thumb = clips.firstOrNull()?.let { thumbs[it.id] }
-        withContext(Dispatchers.IO) {
-            File(projectsDir, "$id.json").writeText(json)
-            val jpg = File(projectsDir, "$id.jpg")
-            if (thumb != null) runCatching { jpg.outputStream().use { thumb.compress(Bitmap.CompressFormat.JPEG, 80, it) } }
-            else jpg.delete()
+        val saved = projectSaveMutex.withLock {
+            // Capture the project identity and matching content together before leaving the main thread.
+            val id = projectId
+            if (id.isEmpty()) return@withLock false
+            val json = serialize()
+            val thumb = clips.firstOrNull()?.let { thumbs[it.id] }
+            withContext(Dispatchers.IO) {
+                val projectFile = AtomicFile(File(projectsDir, "$id.json"))
+                var stream: java.io.FileOutputStream? = null
+                try {
+                    stream = projectFile.startWrite()
+                    stream.write(json.toByteArray(Charsets.UTF_8))
+                    projectFile.finishWrite(stream)
+                    stream = null
+                } catch (e: Exception) {
+                    stream?.let { projectFile.failWrite(it) }
+                    throw e
+                }
+
+                val jpgFile = AtomicFile(File(projectsDir, "$id.jpg"))
+                if (thumb != null) {
+                    var imageStream: java.io.FileOutputStream? = null
+                    try {
+                        imageStream = jpgFile.startWrite()
+                        if (!thumb.compress(Bitmap.CompressFormat.JPEG, 80, imageStream)) {
+                            throw IllegalStateException("Could not encode project thumbnail")
+                        }
+                        jpgFile.finishWrite(imageStream)
+                        imageStream = null
+                    } catch (e: Exception) {
+                        imageStream?.let { jpgFile.failWrite(it) }
+                        throw e
+                    }
+                } else {
+                    jpgFile.delete()
+                }
+            }
+            true
         }
-        refreshProjects()
+        if (saved) refreshProjects()
     }
 
     private suspend fun refreshProjects() {
@@ -258,9 +385,13 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     }.getOrNull()
 
     private fun resetPlayback() {
-        previewAll = false
-        previewKey = null; previewImageId = -1L; previewBitmap = null; pendingSeek = -1L
-        player.pause(); player.clearMediaItems()
+        timeline.reset()
+    }
+
+    /** After the VM changes the selection itself (add, split, duplicate, delete...), move the playhead there. */
+    private fun syncPlayheadToSelection() {
+        val id = selectedId
+        if (id == null) timeline.reset() else timeline.seekToClip(id, false)
     }
 
     private fun applyLoaded(id: String, l: Loaded) {
@@ -287,6 +418,14 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun loadInto(id: String): Boolean {
         val raw = withContext(Dispatchers.IO) { runCatching { File(projectsDir, "$id.json").readText() }.getOrNull() } ?: return false
         val l = withContext(Dispatchers.IO) { loadFromJson(raw) } ?: return false
+        if (l.dropped > 0) {
+            // Missing media is removed from the open project. Keep the untouched original once, so
+            // clips that were only temporarily unavailable (e.g. storage not mounted) are not lost for good.
+            withContext(Dispatchers.IO) {
+                val bak = File(projectsDir, "$id.json.bak")
+                if (!bak.exists()) runCatching { bak.writeText(raw) }
+            }
+        }
         applyLoaded(id, l)
         return true
     }
@@ -351,8 +490,12 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val wasCurrent = id == projectId
         if (wasCurrent) projectId = ""   // stop autosave from re-creating it
         viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                File(projectsDir, "$id.json").delete(); File(projectsDir, "$id.jpg").delete()
+            // Wait for any in-flight autosave so it cannot re-create the deleted project.
+            projectSaveMutex.withLock {
+                withContext(Dispatchers.IO) {
+                    File(projectsDir, "$id.json").delete(); File(projectsDir, "$id.jpg").delete()
+                    File(projectsDir, "$id.json.bak").delete()
+                }
             }
             refreshProjects()
             if (wasCurrent) {
@@ -386,6 +529,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                 clips = clips + clip
                 if (thumb != null) thumbs[clip.id] = thumb
                 selectedId = clip.id
+                syncPlayheadToSelection()
             }
         }
     }
@@ -427,7 +571,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     fun split() {
         val c = selected ?: return
         if (c.isImage) { toast("Photos can't be split. Drag the handles to set the duration."); return }
-        val pos = player.currentPosition
+        val pos = playheadLocalMediaMs()
         if (pos < 300 || pos > c.trimmedMs - 300) { toast("Move the playhead inside the clip first"); return }
         record(true)
         val at = c.startMs + pos
@@ -437,12 +581,13 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val i = clips.indexOfFirst { it.id == c.id }
         clips = clips.toMutableList().apply { set(i, first); add(i + 1, second) }
         selectedId = second.id
+        syncPlayheadToSelection()
     }
 
     fun trimToPlayhead(left: Boolean) {
         val c = selected ?: return
         if (c.isImage) { toast("Drag the clip handles to change a photo's duration"); return }
-        val pos = player.currentPosition
+        val pos = playheadLocalMediaMs()
         if (pos < 300 || pos > c.trimmedMs - 300) { toast("Move the playhead inside the clip first"); return }
         update(c.id) { if (left) it.copy(startMs = it.startMs + pos) else it.copy(endMs = it.startMs + pos) }
     }
@@ -455,6 +600,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val i = clips.indexOfFirst { it.id == c.id }
         clips = clips.toMutableList().apply { add(i + 1, copy) }
         selectedId = copy.id
+        syncPlayheadToSelection()
     }
 
     fun delete() {
@@ -464,7 +610,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         clips = clips.filter { it.id != c.id }
         selectedId = clips.getOrNull(minOf(i, clips.size - 1))?.id
         selectedLayerId = null
-        if (clips.isEmpty()) { previewKey = null; previewImageId = -1L; previewBitmap = null; player.clearMediaItems() }
+        if (clips.isEmpty()) timeline.reset() else syncPlayheadToSelection()
     }
 
     fun move(dir: Int) {
@@ -485,16 +631,22 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun addAudio(uri: Uri, name: String? = null, offsetMs: Long = 0L) {
         if (audioTracks.size >= 4) { toast("Up to 4 audio tracks"); return }
+        record(true)
         val first = audioTracks.isEmpty() && offsetMs == 0L
         audioTracks = audioTracks + AudioTrack(nextId++, uri, name ?: displayName(uri), loop = first, offsetMs = offsetMs)
         ensureWaveform(uri)
     }
 
     fun updateAudio(id: Long, f: (AudioTrack) -> AudioTrack) {
+        record()
         audioTracks = audioTracks.map { if (it.id == id) f(it) else it }
     }
 
-    fun removeAudio(id: Long) { audioTracks = audioTracks.filter { it.id != id } }
+    fun removeAudio(id: Long) {
+        if (audioTracks.none { it.id == id }) return
+        record(true)
+        audioTracks = audioTracks.filter { it.id != id }
+    }
 
     fun ensureWaveform(uri: Uri) {
         val key = uri.toString()
@@ -523,7 +675,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             r.prepare()
             r.start()
             recorder = r; recordFile = f; recordOffsetMs = offset; recording = true
-            if (clips.any { !it.isImage }) playAll()
+            selectedId?.let { timeline.seekToClip(it, true) }
             true
         } catch (e: Exception) {
             toast("Could not start recording")
@@ -536,7 +688,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         try { r.stop() } catch (e: Exception) { }
         r.release()
         recorder = null; recording = false
-        player.pause()
+        timeline.pause()
         val f = recordFile ?: return
         if (f.exists() && f.length() > 1000) addAudio(Uri.fromFile(f), "Voiceover", recordOffsetMs) else toast("Recording was too short")
     }
@@ -609,6 +761,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val i = clips.indexOfFirst { it.id == c.id }
         clips = clips.toMutableList().apply { removeAt(i); addAll(i, listOf(a, b, d)) }
         selectedId = b.id
+        syncPlayheadToSelection()
     }
 
     // ---------- text & sticker layers ----------
@@ -633,124 +786,42 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun toast(msg: String) = Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
 
-    // ---------- preview ----------
-    private fun clipItem(c: Clip): MediaItem = MediaItem.Builder().setUri(c.uri)
-        .setClippingConfiguration(
-            MediaItem.ClippingConfiguration.Builder()
-                .setStartPositionMs(c.startMs).setEndPositionMs(c.endMs).build()
-        ).build()
+    // ---------- preview (delegates to TimelinePlayer) ----------
+    val timeMs: Long get() = timeline.timeMs
+    val isPlaying: Boolean get() = timeline.isPlaying
 
-    private fun applyClipSettings(c: Clip, kfFrac: Float = -1f) {
-        player.setPlaybackParameters(PlaybackParameters(c.speed))
-        player.volume = if (c.muted) 0f else c.volume.coerceAtMost(1f)
-        player.setVideoEffects(buildVideoEffects(c, null, false, 0, kfFrac))
+    /** Time inside the clip under the playhead, in source (media) milliseconds. */
+    fun playheadLocalMediaMs(): Long {
+        val c = clips.getOrNull(timeline.currentIndex) ?: return 0L
+        return (timeline.localOutMs() * c.speed).toLong().coerceIn(0L, c.trimmedMs)
     }
 
-    fun applyPreview(c: Clip, kfFrac: Float = -1f) {
-        if (previewAll) return
-        if (c.isImage) {
-            pendingSeek = -1L
-            player.pause()
-            if (previewKey != null) { player.clearMediaItems(); previewKey = null }
-            if (previewImageId != c.id) {
-                previewImageId = c.id
-                viewModelScope.launch { previewBitmap = withContext(Dispatchers.IO) { decodeBitmap(c.uri, 1600) } }
-            }
-            return
-        }
-        previewBitmap = null; previewImageId = -1L
-        val key = Triple(c.id, c.startMs, c.endMs)
-        if (key != previewKey) {
-            previewKey = key
-            player.setMediaItem(clipItem(c))
-            player.prepare()
-        }
-        applyClipSettings(c, kfFrac)
-        if (pendingSeek >= 0) { player.seekTo(pendingSeek); pendingSeek = -1L }
+    fun togglePlay() = timeline.toggle()
+
+    fun pausePreview() = timeline.pause()
+
+    /** Scrub the playhead to a project time (pauses playback). */
+    fun seekTimeline(ms: Long) = timeline.seekTo(ms, false)
+
+    /** Selects a clip and puts the playhead at its start. */
+    fun selectClip(id: Long) {
+        selectedId = id
+        timeline.seekToClip(id, false)
     }
 
-    /** Move the playhead to a clip + local position (used by timeline scrubbing and taps). */
-    fun scrubTo(c: Clip, localMs: Long) {
-        player.pause()
-        if (previewAll) {
-            previewAll = false; player.clearMediaItems(); previewKey = null
-            if (c.id == selectedId) { selected?.let { applyPreview(it) } }
-        }
-        if (c.id != selectedId) {
-            selectedId = c.id
-            pendingSeek = localMs
-        } else if (!c.isImage) {
-            player.seekTo(localMs)
-        }
-    }
+    /** Called after any edit: the preview re-reads the project (live effects, trims, order). */
+    fun onProjectChanged() = timeline.refresh()
 
-    // ---- play the whole project (video clips, in order) ----
-    fun playAll() {
-        val vids = clips.filter { !it.isImage }
-        if (vids.isEmpty()) { toast("Add a video first"); return }
-        previewBitmap = null; previewImageId = -1L
-        playlist = vids; previewAll = true; previewKey = null
-        val start = vids.indexOfFirst { it.id == selectedId }.coerceAtLeast(0)
-        player.setMediaItems(vids.map { clipItem(it) }, start, 0L)
-        player.prepare()
-        applyClipSettings(vids[start])
-        selectedId = vids[start].id
-        player.play()
-    }
-
-    private fun syncPlaylistItem() {
-        val c = playlist.getOrNull(player.currentMediaItemIndex) ?: return
-        selectedId = c.id
-        applyClipSettings(c)
-    }
-
-    fun stopPlayAll() {
-        if (!previewAll) return
-        previewAll = false
-        player.pause(); player.clearMediaItems(); previewKey = null
-        selected?.let { applyPreview(it) }
-    }
-
-    private fun leavePlayAll() {
-        if (!previewAll) return
-        previewAll = false
-        player.pause(); player.clearMediaItems(); previewKey = null
-        viewModelScope.launch { delay(150); selected?.let { applyPreview(it) } }
-    }
-
-    fun projectPositionMs(): Long {
-        if (!previewAll) return 0L
-        val idx = player.currentMediaItemIndex
-        val before = playlist.take(idx).sumOf { it.outputMs }
-        val c = playlist.getOrNull(idx)
-        return before + (player.currentPosition / (c?.speed ?: 1f)).toLong()
-    }
-
-    fun playlistTotalMs(): Long = if (previewAll) playlist.sumOf { it.outputMs } else 0L
-
-    fun seekProject(ms: Long) {
-        var acc = 0L
-        for ((i, c) in playlist.withIndex()) {
-            if (ms < acc + c.outputMs || i == playlist.lastIndex) {
-                player.seekTo(i, ((ms - acc) * c.speed).toLong().coerceAtLeast(0L))
-                return
-            }
-            acc += c.outputMs
-        }
-    }
-
-    fun togglePlay() {
-        if (!previewAll && selected?.isImage == true) return
-        if (player.isPlaying) player.pause() else {
-            if (player.playbackState == Player.STATE_ENDED) {
-                if (previewAll) player.seekTo(0, 0L) else player.seekTo(0)
-            }
-            player.play()
-        }
+    /** Moves the playhead to a spot inside [c], given in source (media) milliseconds. */
+    fun scrubTo(c: Clip, localMediaMs: Long) {
+        val i = clips.indexOfFirst { it.id == c.id }
+        if (i < 0) return
+        timeline.seekTo(timeline.startOf(i) + (localMediaMs / c.speed).toLong(), false)
     }
 
     // ---------- export ----------
     fun applyPreset(kind: Int) {
+        record(true)
         when (kind) {
             0 -> { aspect = Aspect.R9x16; quality = 1080; fill = true; fps = 30; bitrateLevel = 2 }   // Reels / Shorts / TikTok
             1 -> { aspect = Aspect.R16x9; quality = 1080; fill = true; fps = 0; bitrateLevel = 2 }    // YouTube
@@ -758,6 +829,9 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             3 -> { aspect = Aspect.R9x16; quality = 720; fill = true; fps = 30; bitrateLevel = 1 }    // WhatsApp / small file
         }
     }
+
+    /** Width in pixels of the exported video (used to scale preview text like the export does). */
+    fun outputWidthPx(): Int = if (clips.isEmpty()) 1080 else outputSize().first
 
     private fun outputSize(): Pair<Int, Int> {
         val first = clips.first()
@@ -790,17 +864,30 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun startExport() {
-        if (clips.isEmpty() || export is ExportState.Running) return
-        player.pause()
+        if (clips.isEmpty() || export is ExportState.Running || exportTracker.isRunning) return
+        val requestId = exportTracker.begin()
+        timeline.pause()
         export = ExportState.Running(0f)
         viewModelScope.launch {
             val problem = withContext(Dispatchers.IO) { preflight() }
-            if (problem != null) { export = ExportState.Failed(problem); return@launch }
-            runExport()
+            if (!exportTracker.owns(requestId)) return@launch
+            if (problem != null) {
+                if (exportTracker.finish(requestId)) export = ExportState.Failed(problem)
+                return@launch
+            }
+            try {
+                runExport(requestId)
+            } catch (e: Exception) {
+                abandonExport(immediate = false)
+                if (exportTracker.finish(requestId)) {
+                    export = ExportState.Failed(e.message ?: "Could not start export")
+                    ExportService.stop(ctx)
+                }
+            }
         }
     }
 
-    private fun runExport() {
+    private fun runExport(requestId: Long) {
         val (w, h) = outputSize()
         val layout = if (fill) Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP else Presentation.LAYOUT_SCALE_TO_FIT
         val comp = buildComposition(ctx, clips, Presentation.createForWidthAndHeight(w, h, layout), audioTracks, fps)
@@ -820,25 +907,60 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             .addListener(object : Transformer.Listener {
                 override fun onCompleted(composition: Composition, exportResult: ExportResult) {
                     viewModelScope.launch {
-                        val uri = withContext(Dispatchers.IO) { saveToGallery(out) }
-                        export = if (uri != null) ExportState.Done(uri) else ExportState.Failed("Could not save the file. Check your free storage.")
-                        ExportService.stop(ctx, if (uri != null) "Your video is saved in Movies/VideoEditor" else null)
+                        var publishedUri: Uri? = null
+                        try {
+                            // A cancelled or superseded export must never reach the gallery.
+                            if (!exportTracker.owns(requestId)) return@launch
+                            publishedUri = withContext(Dispatchers.IO) { saveToGallery(out) }
+                            if (exportTracker.finish(requestId)) {
+                                transformer = null
+                                exportFile = null
+                                val uri = publishedUri
+                                if (uri != null) {
+                                    export = ExportState.Done(uri)
+                                    ExportService.stop(ctx, "Your video is saved in Movies/VideoEditor")
+                                } else {
+                                    export = ExportState.Failed("Could not save the file. Check your free storage.")
+                                    ExportService.stop(ctx)
+                                }
+                                publishedUri = null   // ownership moved to the Done state
+                            }
+                        } catch (e: Exception) {
+                            if (exportTracker.finish(requestId)) {
+                                transformer = null
+                                exportFile = null
+                                export = ExportState.Failed(e.message ?: "Could not save the exported video")
+                                ExportService.stop(ctx)
+                            }
+                        } finally {
+                            // Cancelled while saving: take the half-published video back out of the gallery.
+                            val orphan = publishedUri
+                            withContext(NonCancellable + Dispatchers.IO) {
+                                if (orphan != null) runCatching { ctx.contentResolver.delete(orphan, null, null) }
+                                out.delete()
+                            }
+                        }
                     }
                 }
 
                 override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
                     out.delete()
-                    export = ExportState.Failed(exportException.message ?: "Export failed")
-                    ExportService.stop(ctx)
+                    if (exportTracker.finish(requestId)) {
+                        transformer = null
+                        exportFile = null
+                        export = ExportState.Failed(exportException.message ?: "Export failed")
+                        ExportService.stop(ctx)
+                    }
                 }
             }).build()
         transformer = t
+        exportFile = out
         ExportService.start(ctx)
         t.start(comp, out.absolutePath)
 
         viewModelScope.launch {
             val holder = ProgressHolder()
-            while (export is ExportState.Running) {
+            while (exportTracker.owns(requestId) && export is ExportState.Running) {
                 if (t.getProgress(holder) != Transformer.PROGRESS_STATE_NOT_STARTED) {
                     export = ExportState.Running(holder.progress / 100f)
                     ExportService.progress(ctx, holder.progress)
@@ -848,8 +970,31 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Stops the Transformer and removes its temporary file. Deleting is delayed briefly so the encoder
+     * has finished releasing the file; leftovers are also cleared by the stale-export cleanup on startup.
+     */
+    private fun abandonExport(immediate: Boolean) {
+        val t = transformer
+        val f = exportFile
+        transformer = null
+        exportFile = null
+        runCatching { t?.cancel() }
+        if (f == null) return
+        if (immediate) {
+            runCatching { f.delete() }
+        } else {
+            viewModelScope.launch(Dispatchers.IO) {
+                delay(1500)
+                runCatching { f.delete() }
+            }
+        }
+    }
+
     fun cancelExport() {
-        transformer?.cancel()
+        // Invalidates preflight, Transformer and gallery-save callbacks of the running export.
+        exportTracker.cancel()
+        abandonExport(immediate = false)
         export = ExportState.Idle
         ExportService.stop(ctx)
     }
@@ -857,6 +1002,9 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     fun dismissExport() { export = ExportState.Idle }
 
     private fun saveToGallery(file: File): Uri? {
+        // Never publish a missing or empty export as a completed gallery video.
+        if (!file.isFile || file.length() <= 0L) return null
+
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, "VideoEditor_${System.currentTimeMillis()}.mp4")
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
@@ -866,10 +1014,15 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val resolver = ctx.contentResolver
         val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: return null
         return try {
-            resolver.openOutputStream(uri)?.use { o -> file.inputStream().use { it.copyTo(o) } }
+            val output = resolver.openOutputStream(uri)
+                ?: throw IllegalStateException("Could not open the gallery output file")
+            output.use { stream -> file.inputStream().use { input -> input.copyTo(stream) } }
+
             values.clear()
             values.put(MediaStore.Video.Media.IS_PENDING, 0)
-            resolver.update(uri, values, null, null)
+            if (resolver.update(uri, values, null, null) <= 0) {
+                throw IllegalStateException("Could not publish the exported video")
+            }
             file.delete()
             uri
         } catch (e: Exception) {
@@ -879,9 +1032,17 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        if (exportTimeoutReceiverRegistered) {
+            runCatching { ctx.unregisterReceiver(exportTimeoutReceiver) }
+            exportTimeoutReceiverRegistered = false
+        }
         runCatching { recorder?.stop() }
         recorder?.release()
-        transformer?.cancel()
-        player.release()
+        if (exportTracker.isRunning) {
+            exportTracker.cancel()
+            ExportService.stop(ctx)   // do not leave the foreground notification behind
+        }
+        abandonExport(immediate = true)
+        timeline.release()
     }
 }
