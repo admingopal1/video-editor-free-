@@ -86,6 +86,9 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     var projectId by mutableStateOf(""); private set
     var projectName by mutableStateOf("My project")
     var projects by mutableStateOf(listOf<ProjectInfo>()); private set
+    /** Keep original project JSON untouched until the user accepts missing-media recovery. */
+    var missingMediaCount by mutableIntStateOf(0); private set
+    var missingMediaRecoveryPending by mutableStateOf(false); private set
 
     var clips by mutableStateOf(listOf<Clip>()); private set
     var selectedId by mutableStateOf<Long?>(null)
@@ -316,6 +319,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private val projectSaveMutex = Mutex()
 
     private suspend fun saveNow() {
+        // Do not overwrite the original project after dropping inaccessible media without explicit user approval.
+        if (missingMediaRecoveryPending) return
         val saved = projectSaveMutex.withLock {
             // Capture the project identity and matching content together before leaving the main thread.
             val id = projectId
@@ -488,6 +493,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         projectId = id
         projectName = l.o.optString("name", "My project")
         thumbs.clear(); thumbs.putAll(l.thumbs)
+        missingMediaCount = l.dropped
+        missingMediaRecoveryPending = l.dropped > 0
         undoStack.clear(); redoStack.clear(); undoCount = 0; redoCount = 0
         clips = l.clips
         nextId = maxOf(
@@ -503,7 +510,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         quality = l.o.optInt("quality", 720); fill = l.o.optBoolean("fill", false)
         fps = l.o.optInt("fps", 0); bitrateLevel = l.o.optInt("bitrate", 0)
         prefs.edit().putString("current", id).apply()
-        if (l.dropped > 0) toast("${l.dropped} clip(s) removed: the file is no longer available")
+        if (l.dropped > 0) toast("${l.dropped} media item(s) unavailable. Original project backup preserved.")
     }
 
     private suspend fun loadInto(id: String): Boolean {
@@ -522,6 +529,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun startEmpty(name: String) {
+        missingMediaCount = 0
+        missingMediaRecoveryPending = false
         resetPlayback()
         projectId = System.currentTimeMillis().toString()
         projectName = name
