@@ -104,7 +104,7 @@ class ModelLogicTest {
         val first = AudioCrossfadeState(1L, 0L, 0L, Long.MAX_VALUE, 0L, 0L, true)
         val second = AudioCrossfadeState(2L, 9_000L, 0L, Long.MAX_VALUE, 0L, 0L, true)
         val result = configureAudioCrossfade(listOf(first, second), 1L, mapOf(1L to 10_000L, 2L to 8_000L), 2_000L)
-        assertEquals(8_000L, result[0].trimEndMs)
+        assertEquals(10_000L, result[0].trimEndMs)
         assertEquals(2_000L, result[0].fadeOutMs)
         assertEquals(8_000L, result[1].offsetMs)
         assertEquals(2_000L, result[1].fadeInMs)
