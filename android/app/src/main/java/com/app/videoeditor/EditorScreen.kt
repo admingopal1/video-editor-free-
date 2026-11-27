@@ -1649,12 +1649,12 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
                     crossfadeDurationSeconds = value
                 }
                 val nextTrack = orderedAudio[orderedIndex + 1]
-                val outgoingDurationMs = (vm.waves[t.uri.toString()]?.size ?: 0) * 100L
-                val incomingDurationMs = (vm.waves[nextTrack.uri.toString()]?.size ?: 0) * 100L
+                val outgoingDurationMs = vm.audioSourceDurationsMs[t.uri.toString()] ?: 0L
+                val incomingDurationMs = vm.audioSourceDurationsMs[nextTrack.uri.toString()] ?: 0L
                 val canCrossfade = outgoingDurationMs > t.trimStartMs && incomingDurationMs > nextTrack.trimStartMs
                 OutlinedButton(onClick = {
                     val durations = vm.audioTracks.associate { track ->
-                        track.id to ((vm.waves[track.uri.toString()]?.size ?: 0) * 100L)
+                        track.id to (vm.audioSourceDurationsMs[track.uri.toString()] ?: 0L)
                     }
                     val states = vm.audioTracks.map { track ->
                         AudioCrossfadeState(track.id, track.offsetMs, track.trimStartMs, track.trimEndMs, track.fadeInMs, track.fadeOutMs, track.loop)
@@ -1662,7 +1662,7 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
                     val updated = configureAudioCrossfade(states, t.id, durations, (crossfadeDurationSeconds * 1000f).toLong()).associateBy { it.id }
                     vm.applyAudioCrossfade(updated)
                 }, enabled = canCrossfade, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (canCrossfade) "Apply ${String.format(Locale.US, "%.1f", crossfadeDurationSeconds)}s crossfade into next track" else "Load both waveforms to enable crossfade")
+                    Text(if (canCrossfade) "Apply ${String.format(Locale.US, "%.1f", crossfadeDurationSeconds)}s crossfade into next track" else "Reading audio duration or checking selected trim ranges")
                 }
             }
             if (t.loop && (t.fadeInMs > 0L || t.fadeOutMs > 0L || t.gainPoints.isNotEmpty() || t.eqGainsDb.any { it != 0f })) {
