@@ -66,6 +66,7 @@ class TimelinePlayer(
     private var currentId = -1L
     private var lastAudioSync = 0L
     private val audioPlayers = HashMap<Long, ExoPlayer>()
+    private val audioEqProcessors = HashMap<Long, AudioEqualizerProcessor>()
     private var duckingCacheKey = ""
     private var duckingCache: Map<Long, List<AudioGainPoint>> = emptyMap()
     private var gateCacheKey = ""
@@ -168,6 +169,7 @@ class TimelinePlayer(
         playerA.release(); playerB.release()
         audioPlayers.values.forEach { runCatching { it.release() } }
         audioPlayers.clear()
+        audioEqProcessors.clear()
     }
 
     // ---------------------------------------------------------------- internals
@@ -319,7 +321,10 @@ class TimelinePlayer(
         lastAudioSync = SystemClock.uptimeMillis()
         val tracks = audioProvider()
         val ids = tracks.map { it.id }.toSet()
-        audioPlayers.keys.filter { it !in ids }.forEach { id -> audioPlayers.remove(id)?.release() }
+        audioPlayers.keys.filter { it !in ids }.forEach { id ->
+            audioPlayers.remove(id)?.release()
+            audioEqProcessors.remove(id)
+        }
         val soloActive = tracks.any { it.solo && !it.muted }
         val audibleTracks = tracks.filter { isAudioTrackAudible(it.muted, it.solo, soloActive) }
         val voiceovers = audibleTracks.filter { it.isVoiceover }
@@ -340,11 +345,14 @@ class TimelinePlayer(
         }
         for (t in tracks) {
             val p = audioPlayers.getOrPut(t.id) {
-                ExoPlayer.Builder(ctx).build().also { ap ->
+                val eq = AudioEqualizerProcessor(t.eqGainsDb)
+                audioEqProcessors[t.id] = eq
+                ExoPlayer.Builder(ctx, EqualizerRenderersFactory(ctx, eq)).build().also { ap ->
                     ap.setMediaItem(MediaItem.fromUri(t.uri))
                     ap.prepare()
                 }
             }
+            audioEqProcessors[t.id]?.setGainsDb(t.eqGainsDb)
             val trackDurationMs = (minOf(t.trimEndMs, t.trimStartMs + (totalMs() - t.offsetMs).coerceAtLeast(0L)) - t.trimStartMs).coerceAtLeast(1L)
             val elapsedMs = (timeMs - t.offsetMs).coerceAtLeast(0L)
             val fadeGain = audioFadeGainAt(elapsedMs, trackDurationMs, t.fadeInMs, t.fadeOutMs)
