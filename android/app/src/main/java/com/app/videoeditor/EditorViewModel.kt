@@ -83,6 +83,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     var overlayClips by mutableStateOf(listOf<OverlayClip>()); private set
     var recording by mutableStateOf(false); private set
     val waves = mutableStateMapOf<String, FloatArray>()
+    /** Full source durations from container metadata; waveform arrays may be intentionally capped. */
+    val audioSourceDurationsMs = mutableStateMapOf<String, Long>()
     private val waveLoading = mutableSetOf<String>()
     private var recorder: MediaRecorder? = null
     private var recordFile: File? = null
@@ -854,8 +856,21 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val key = uri.toString()
         if (waves.containsKey(key) || !waveLoading.add(key)) return
         viewModelScope.launch {
-            val w = withContext(Dispatchers.IO) { Waveform.compute(ctx, uri) } ?: FloatArray(0)
-            waves[key] = w
+            val result = withContext(Dispatchers.IO) {
+                val duration = runCatching {
+                    MediaMetadataRetriever().let { retriever ->
+                        try {
+                            retriever.setDataSource(ctx, uri)
+                            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                        } finally {
+                            retriever.release()
+                        }
+                    }
+                }.getOrDefault(0L).coerceAtLeast(0L)
+                duration to (Waveform.compute(ctx, uri) ?: FloatArray(0))
+            }
+            audioSourceDurationsMs[key] = result.first
+            waves[key] = result.second
             waveLoading.remove(key)
         }
     }
