@@ -968,7 +968,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private fun runExport(requestId: Long) {
         val (w, h) = outputSize()
         val layout = if (fill) Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP else Presentation.LAYOUT_SCALE_TO_FIT
-        val comp = buildComposition(ctx, clips, Presentation.createForWidthAndHeight(w, h, layout), audioTracks, fps)
+        val comp = buildComposition(ctx, clips, Presentation.createForWidthAndHeight(w, h, layout), audioTracks, fps, overlayClips)
         val out = File(ctx.cacheDir, "export_${System.currentTimeMillis()}.mp4")
 
         val builder = Transformer.Builder(ctx)
