@@ -1,5 +1,7 @@
 package com.app.videoeditor
 
+import kotlin.math.roundToLong
+
 /**
  * Editing operations for a TextLayer's clip-relative output interval.
  * Fractions are stored for backwards compatibility; calculations use milliseconds
@@ -16,8 +18,8 @@ data class TextLayerTiming(
 
 fun textLayerTiming(layer: TextLayer, clipOutputDurationMs: Long): TextLayerTiming {
     val total = clipOutputDurationMs.coerceAtLeast(0L)
-    val start = (layer.startFrac.coerceIn(0f, 1f) * total).toLong().coerceIn(0L, total)
-    val end = (layer.endFrac.coerceIn(0f, 1f) * total).toLong().coerceIn(start, total)
+    val start = (layer.startFrac.coerceIn(0f, 1f).toDouble() * total.toDouble()).roundToLong().coerceIn(0L, total)
+    val end = (layer.endFrac.coerceIn(0f, 1f).toDouble() * total.toDouble()).roundToLong().coerceIn(start, total)
     return TextLayerTiming(start, end)
 }
 
