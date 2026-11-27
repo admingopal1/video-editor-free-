@@ -97,3 +97,24 @@ fun overlayClipFromJson(o: JSONObject): OverlayClip? = runCatching {
     )
     clip.takeIf { it.isValidOverlayClip() }
 }.getOrNull()
+
+
+/**
+ * Reorders one overlay relative to its neighbours. Lower order values are drawn
+ * first (behind); higher values are drawn later (in front). The returned list
+ * always has compact, unique order values while preserving all other properties.
+ */
+fun reorderOverlayLayer(
+    layers: List<OverlayClip>,
+    id: Long,
+    direction: Int
+): List<OverlayClip> {
+    if (direction == 0 || layers.none { it.id == id }) return layers
+    val ordered = layers.sortedWith(compareBy<OverlayClip> { it.layerOrder }.thenBy { it.id }).toMutableList()
+    val from = ordered.indexOfFirst { it.id == id }
+    val to = (from + direction.coerceIn(-1, 1)).coerceIn(0, ordered.lastIndex)
+    if (from == to) return layers
+    val moved = ordered.removeAt(from)
+    ordered.add(to, moved)
+    return ordered.mapIndexed { index, layer -> layer.copy(layerOrder = index) }
+}
