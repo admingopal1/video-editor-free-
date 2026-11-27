@@ -26,7 +26,7 @@ fun trimOverlayStartByOutputDelta(layer: OverlayClip, deltaOutputMs: Long): Over
 fun trimOverlayEndByOutputDelta(layer: OverlayClip, deltaOutputMs: Long): OverlayClip {
     if (layer.isImage || deltaOutputMs == 0L || layer.speed <= 0f || !layer.speed.isFinite()) return layer
     val minSourceMs = 100L
-    val minEnd = (layer.startMs + minSourceMs).coerceAtMost(layer.durationMs)
+    val minEnd = saturatingAdd(layer.startMs, minSourceMs).coerceAtMost(layer.durationMs)
     val requested = (deltaOutputMs.toDouble() * layer.speed).toLong()
     val newEnd = saturatingAdd(layer.endMs, requested).coerceIn(minEnd, layer.durationMs)
     return layer.copy(endMs = newEnd)
