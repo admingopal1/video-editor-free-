@@ -370,7 +370,14 @@ class TimelinePlayer(
             val keyframeGain = audioKeyframeGainAt(t.gainPoints, elapsedMs)
             val duckGain = audioKeyframeGainAt(duckingCache[t.id] ?: emptyList(), elapsedMs)
             val gateGain = audioKeyframeGainAt(gateCache[t.id] ?: emptyList(), elapsedMs)
-            p.volume = if (!isAudioTrackAudible(t.muted, t.solo, soloActive)) 0f else (t.volume * fadeGain * keyframeGain * duckGain * gateGain).coerceIn(0f, 1f)
+            p.volume = combinedPreviewAudioGain(
+                volume = t.volume,
+                fade = fadeGain,
+                automation = keyframeGain,
+                ducking = duckGain,
+                noiseGate = gateGain,
+                audible = isAudioTrackAudible(t.muted, t.solo, soloActive)
+            )
             p.repeatMode = if (t.loop && t.fadeInMs == 0L && t.fadeOutMs == 0L && t.gainPoints.isEmpty() && !t.autoDuck && !t.noiseGateEnabled && (duckingCache[t.id].isNullOrEmpty()) && (gateCache[t.id].isNullOrEmpty()) && t.offsetMs == 0L && t.trimEndMs == Long.MAX_VALUE) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
             val wanted = timeMs - t.offsetMs + t.trimStartMs
             val reachedTrimEnd = t.trimEndMs != Long.MAX_VALUE && wanted >= t.trimEndMs
