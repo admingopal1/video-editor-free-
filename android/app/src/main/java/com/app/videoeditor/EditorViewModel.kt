@@ -784,6 +784,16 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         audioTracks = audioTracks.map { if (it.id == id) f(it) else it }
     }
 
+    /** Start one undoable automation gesture; subsequent pointer updates share this snapshot. */
+    fun beginAudioAutomationDrag() {
+        record(true)
+    }
+
+    /** Apply high-frequency pointer updates without filling the undo stack on every frame. */
+    fun updateAudioAutomationDuringDrag(id: Long, f: (AudioTrack) -> AudioTrack) {
+        audioTracks = audioTracks.map { if (it.id == id) f(it) else it }
+    }
+
     fun renameAudio(id: Long, name: String) {
         val normalized = normalizedAudioTrackName(name)
         if (normalized.isBlank()) { toast("Track name cannot be empty"); return }
