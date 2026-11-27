@@ -586,16 +586,6 @@ private fun Timeline(
                     }
                 }
                 // audio tracks (waveform lanes)
-                val renamingAudio = vm.audioTracks.firstOrNull { it.id == audioRenameId }
-    if (renamingAudio != null) {
-        AlertDialog(
-            onDismissRequest = { audioRenameId = null },
-            title = { Text("Rename audio track") },
-            text = { OutlinedTextField(value = audioRenameValue, onValueChange = { audioRenameValue = it }, singleLine = true, label = { Text("Track name") }) },
-            confirmButton = { TextButton(onClick = { vm.renameAudio(renamingAudio.id, audioRenameValue); audioRenameId = null }) { Text("Save") } },
-            dismissButton = { TextButton(onClick = { audioRenameId = null }) { Text("Cancel") } }
-        )
-    }
     vm.audioTracks.forEach { t ->
                     val wave = vm.waves[t.uri.toString()]
                     val x = minOf(t.offsetMs / 1000f * dpPerSec, maxOf(totalDp - 40f, 0f))
@@ -1550,6 +1540,16 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
     }
     if (vm.audioTracks.isEmpty()) {
         Text("No audio yet. Add music or record your voice.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+    }
+    val renamingAudio = vm.audioTracks.firstOrNull { it.id == audioRenameId }
+    if (renamingAudio != null) {
+        AlertDialog(
+            onDismissRequest = { audioRenameId = null },
+            title = { Text("Rename audio track") },
+            text = { OutlinedTextField(value = audioRenameValue, onValueChange = { audioRenameValue = it }, singleLine = true, label = { Text("Track name") }) },
+            confirmButton = { TextButton(onClick = { vm.renameAudio(renamingAudio.id, audioRenameValue); audioRenameId = null }) { Text("Save") } },
+            dismissButton = { TextButton(onClick = { audioRenameId = null }) { Text("Cancel") } }
+        )
     }
 }
 
