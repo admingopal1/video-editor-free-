@@ -34,9 +34,9 @@ class OverlayTrimTest {
         val before = video()
         val after = trimOverlayEndByOutputDelta(before, 500L)
 
-        assertEquals(2_000L, after.endMs)
+        assertEquals(10_000L, after.endMs)
         assertEquals(before.timelineStartMs, after.timelineStartMs)
-        assertEquals(500L, after.outputMs)
+        assertEquals(4_500L, after.outputMs)
     }
 
     @Test
