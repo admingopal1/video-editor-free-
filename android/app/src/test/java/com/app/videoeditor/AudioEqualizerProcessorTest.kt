@@ -56,5 +56,7 @@ class AudioEqualizerProcessorTest {
             assertTrue(gains.all { it in -12f..12f })
         }
         assertEquals(List(5) { 0f }, AudioEqualizerProcessor.presetGains("Flat"))
+        assertEquals(listOf(5f, 3f, 0f, 0f, 1f), AudioEqualizerProcessor.presetGains("BASS BOOST"))
+        assertEquals(List(5) { 0f }, AudioEqualizerProcessor.presetGains("unknown preset"))
     }
 }
