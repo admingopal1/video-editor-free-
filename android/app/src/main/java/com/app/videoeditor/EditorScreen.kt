@@ -710,21 +710,43 @@ private fun Timeline(
                         }
                     }
                 }
-                // text + sticker track: each layer sits at its own time range inside its clip
-                if (vm.clips.any { it.layers.isNotEmpty() }) {
-                    val rows = vm.clips.maxOf { minOf(it.layers.size, 3) }.coerceAtLeast(1)
-                    Box(Modifier.padding(top = 4.dp).width(totalDp.dp).height((rows * 24).dp)) {
+                // Text and sticker layers use overlap-aware lanes across the whole project timeline.
+                val textLayerEntries = buildList {
+                    var clipStartMs = 0L
+                    vm.clips.forEach { clip ->
+                        clip.layers.forEach { layer ->
+                            val startFraction = layer.startFrac.coerceIn(0f, 1f)
+                            val endFraction = layer.endFrac.coerceIn(0f, 1f)
+                            val localStart = (clip.outputMs.toDouble() * startFraction).toLong()
+                            val localEnd = (clip.outputMs.toDouble() * endFraction).toLong()
+                            val startMs = if (Long.MAX_VALUE - clipStartMs < localStart) Long.MAX_VALUE else clipStartMs + localStart
+                            val endMs = if (Long.MAX_VALUE - clipStartMs < localEnd) Long.MAX_VALUE else clipStartMs + localEnd
+                            add(TextLayerTimelineEntry(clip.id, layer.id, startMs, endMs))
+                        }
+                        clipStartMs = if (Long.MAX_VALUE - clipStartMs < clip.outputMs.coerceAtLeast(0L)) {
+                            Long.MAX_VALUE
+                        } else clipStartMs + clip.outputMs.coerceAtLeast(0L)
+                    }
+                }
+                val textLayerPlacements = assignTextLayerLanes(textLayerEntries)
+                val textLayerLaneById = textLayerPlacements.associate { (it.clipId to it.layerId) to it.lane }
+                val textLayerLaneCount = (textLayerPlacements.maxOfOrNull { it.lane } ?: -1) + 1
+                if (textLayerLaneCount > 0) {
+                    Box(Modifier.padding(top = 4.dp).width(totalDp.dp).height((textLayerLaneCount * 24).dp)) {
                         vm.clips.forEachIndexed { i, c ->
-                            c.layers.forEachIndexed { li, l ->
-                                val x = starts[i] + widths[i] * l.startFrac
-                                val w = maxOf(widths[i] * (l.endFrac - l.startFrac), 30f)
+                            c.layers.forEach { layer ->
+                                val lane = textLayerLaneById[c.id to layer.id] ?: 0
+                                val startFraction = layer.startFrac.coerceIn(0f, 1f)
+                                val endFraction = layer.endFrac.coerceIn(startFraction, 1f)
+                                val x = starts[i] + widths[i] * startFraction
+                                val w = maxOf(widths[i] * (endFraction - startFraction), 30f)
                                 Box(
-                                    Modifier.offset(x = x.dp, y = ((li % 3) * 24).dp).width(w.dp).height(22.dp)
+                                    Modifier.offset(x = x.dp, y = (lane * 24).dp).width(w.dp).height(22.dp)
                                         .clip(RoundedCornerShape(8.dp)).background(Brush.horizontalGradient(listOf(Pal.violetDeep, Pal.pink)))
-                                        .clickable { vm.selectClip(c.id); vm.selectedLayerId = l.id; openTool(Tool.Text) }
+                                        .clickable { vm.selectClip(c.id); vm.selectedLayerId = layer.id; openTool(Tool.Text) }
                                         .padding(horizontal = 5.dp),
                                     contentAlignment = Alignment.CenterStart
-                                ) { Text(l.text.take(12), fontSize = 10.sp, maxLines = 1, color = Color.White) }
+                                ) { Text(layer.text.take(12), fontSize = 10.sp, maxLines = 1, color = Color.White) }
                             }
                         }
                     }
