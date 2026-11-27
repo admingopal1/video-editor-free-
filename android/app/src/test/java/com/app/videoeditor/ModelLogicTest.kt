@@ -5,6 +5,30 @@ import org.junit.Test
 
 class ModelLogicTest {
     @Test
+    fun originalClipAudioFadesPersistAndLegacyProjectsStayNeutral() {
+        val clip = Clip(
+            id = 92L,
+            uri = android.net.Uri.parse("content://test/audio-fade"),
+            durationMs = 8_000L,
+            width = 1280,
+            height = 720,
+            audioFadeInMs = 1_250L,
+            audioFadeOutMs = 2_000L
+        )
+        val restored = clipFromJson(clip.toJson())
+        assertEquals(1_250L, restored.audioFadeInMs)
+        assertEquals(2_000L, restored.audioFadeOutMs)
+
+        val legacy = clip.toJson().apply {
+            remove("audioFadeIn")
+            remove("audioFadeOut")
+        }
+        val restoredLegacy = clipFromJson(legacy)
+        assertEquals(0L, restoredLegacy.audioFadeInMs)
+        assertEquals(0L, restoredLegacy.audioFadeOutMs)
+    }
+
+    @Test
     fun clipOriginalAudioEqRoundTripsAndLegacyProjectsDefaultToFlat() {
         val original = Clip(
             id = 91L,
