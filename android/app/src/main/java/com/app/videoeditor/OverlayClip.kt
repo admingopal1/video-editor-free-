@@ -32,7 +32,7 @@ data class OverlayClip(
 ) {
     val trimmedMs: Long get() = trimmedDurationMs(startMs, endMs)
     val outputMs: Long get() = outputDurationMs(startMs, endMs, speed)
-    val timelineEndMs: Long get() = timelineStartMs + outputMs
+    val timelineEndMs: Long get() = if (outputMs > Long.MAX_VALUE - timelineStartMs) Long.MAX_VALUE else timelineStartMs + outputMs
 
     fun isVisibleAt(projectTimeMs: Long): Boolean =
         projectTimeMs >= timelineStartMs && projectTimeMs < timelineEndMs
