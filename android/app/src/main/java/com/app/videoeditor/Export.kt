@@ -352,7 +352,7 @@ private fun addColorEffects(l: MutableList<Effect>, c: Clip, context: Context? =
             val bytes = ctx.contentResolver.openInputStream(Uri.parse(uriString))?.use { it.readBytes() }
                 ?: throw IllegalStateException("The selected LUT file is no longer accessible")
             require(bytes.size <= 8 * 1024 * 1024) { "LUT file exceeds the 8 MiB limit" }
-            val cube = CubeLut.parse(bytes.toString(Charsets.UTF_8)).toMedia3ArgbCube()
+            val cube = CubeLut.parse(bytes.toString(Charsets.UTF_8)).toMedia3ArgbCube(c.lutIntensity)
             l += SingleColorLut.createFromCube(cube)
         } catch (error: Exception) {
             if (strictLut) throw IllegalStateException("Could not apply the selected 3D LUT: ${error.message}", error)

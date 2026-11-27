@@ -52,6 +52,50 @@ class CubeLutTest {
         assertEquals(0xFFFFFFFF.toInt(), cube[1][1][1])
     }
 
+    @Test fun zeroIntensityProducesIdentityCube() {
+        val invert = """
+            LUT_3D_SIZE 2
+            1 1 1
+            0 1 1
+            1 0 1
+            0 0 1
+            1 1 0
+            0 1 0
+            1 0 0
+            0 0 0
+        """.trimIndent()
+        val cube = CubeLut.parse(invert).toMedia3ArgbCube(0f)
+        assertEquals(0xFF000000.toInt(), cube[0][0][0])
+        assertEquals(0xFFFFFFFF.toInt(), cube[1][1][1])
+    }
+
+    @Test fun partialIntensityBlendsOriginalAndLutOutput() {
+        val invert = """
+            LUT_3D_SIZE 2
+            1 1 1
+            0 1 1
+            1 0 1
+            0 0 1
+            1 1 0
+            0 1 0
+            1 0 0
+            0 0 0
+        """.trimIndent()
+        val cube = CubeLut.parse(invert).toMedia3ArgbCube(0.5f)
+        assertEquals(0xFF7F7F7F.toInt(), cube[0][0][0])
+        assertEquals(0xFF7F7F7F.toInt(), cube[1][1][1])
+    }
+
+    @Test fun rejectsNonFiniteOrOutOfRangeIntensity() {
+        listOf(Float.NaN, Float.POSITIVE_INFINITY, -0.01f, 1.01f).forEach { amount ->
+            try {
+                CubeLut.parse(identityCube()).toMedia3ArgbCube(amount)
+                fail("Expected invalid intensity to be rejected")
+            } catch (expected: IllegalArgumentException) {
+                assertTrue(expected.message.orEmpty().isNotBlank())
+            }
+        }
+    }
     @Test fun rejectsMissingOrIncorrectEntryCount() {
         assertInvalid("TITLE missing size")
         assertInvalid("LUT_3D_SIZE 2\n0 0 0")

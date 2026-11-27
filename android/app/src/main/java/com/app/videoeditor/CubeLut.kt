@@ -55,19 +55,25 @@ class CubeLut private constructor(
      * Sampling the normalized input grid also bakes DOMAIN_MIN/MAX into the table,
      * so the GPU effect can consume ordinary normalized video RGB values.
      */
-    fun toMedia3ArgbCube(): Array<Array<IntArray>> =
-        Array(size) { r ->
+    fun toMedia3ArgbCube(intensity: Float = 1f): Array<Array<IntArray>> {
+        require(intensity.isFinite() && intensity in 0f..1f) { "LUT intensity must be between 0 and 1" }
+        val denominator = (size - 1).toFloat()
+        return Array(size) { r ->
             Array(size) { g ->
                 IntArray(size) { b ->
-                    val d = (size - 1).toFloat()
-                    val out = sample(r / d, g / d, b / d)
-                    val red = (out[0].coerceIn(0f, 1f) * 255f).toInt()
-                    val green = (out[1].coerceIn(0f, 1f) * 255f).toInt()
-                    val blue = (out[2].coerceIn(0f, 1f) * 255f).toInt()
+                    val input = floatArrayOf(r / denominator, g / denominator, b / denominator)
+                    val graded = sample(input[0], input[1], input[2])
+                    val red = (mix(input[0], graded[0], intensity).coerceIn(0f, 1f) * 255f).toInt()
+                    val green = (mix(input[1], graded[1], intensity).coerceIn(0f, 1f) * 255f).toInt()
+                    val blue = (mix(input[2], graded[2], intensity).coerceIn(0f, 1f) * 255f).toInt()
                     (0xFF shl 24) or (red shl 16) or (green shl 8) or blue
                 }
             }
         }
+    }
+
+    private fun mix(original: Float, graded: Float, amount: Float): Float =
+        original + (graded - original) * amount
 
     companion object {
         const val MIN_SIZE = 2

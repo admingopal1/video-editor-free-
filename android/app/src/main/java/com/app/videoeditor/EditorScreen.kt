@@ -1327,7 +1327,13 @@ private fun ToolPanel(
                 Button(onClick = pickLut, enabled = !c.isImage) { Text(if (c.lutUri == null) "Import .cube LUT" else "Replace LUT") }
                 if (c.lutUri != null) TextButton(onClick = { vm.update(id) { it.copy(lutUri = null) } }) { Text("Remove") }
             }
-            if (c.lutUri != null) Text("LUT attached", color = Pal.mint, style = MaterialTheme.typography.bodySmall)
+            if (c.lutUri != null) {
+                Text("LUT attached", color = Pal.mint, style = MaterialTheme.typography.bodySmall)
+                Slide("LUT strength", c.lutIntensity, 0f..1f, "${(c.lutIntensity * 100f).toInt()}%") { value ->
+                    vm.update(id) { it.copy(lutIntensity = value.coerceIn(0f, 1f)) }
+                }
+                Text("0% keeps the original grade; 100% applies the imported LUT fully.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            }
             Text("RGB channel balance", fontWeight = FontWeight.SemiBold)
             Text("Fine-tune red, green and blue independently. 100% is neutral.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
             Slide("Red", c.redGain, 0.5f..1.5f, "${(c.redGain * 100).toInt()}%") { v -> vm.update(id) { it.copy(redGain = v) } }
@@ -1346,7 +1352,8 @@ private fun ToolPanel(
                         hslAqua = 0f, hslBlue = 0f, hslPurple = 0f, hslMagenta = 0f,
                         redCurveShadows = 0f, redCurveMidtones = 0f, redCurveHighlights = 0f,
                         greenCurveShadows = 0f, greenCurveMidtones = 0f, greenCurveHighlights = 0f,
-                        blueCurveShadows = 0f, blueCurveMidtones = 0f, blueCurveHighlights = 0f
+                        blueCurveShadows = 0f, blueCurveMidtones = 0f, blueCurveHighlights = 0f,
+                        lutIntensity = 1f
                     )
                 }
             }) { Text("Reset") }

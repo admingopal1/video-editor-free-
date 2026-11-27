@@ -385,6 +385,8 @@ fun isValidTint(tint: Float): Boolean = tint.isFinite() && tint in -1f..1f
 fun isValidToneCurve(shadows: Float, midtones: Float, highlights: Float): Boolean =
     listOf(shadows, midtones, highlights).all { it.isFinite() && it in -0.2f..0.2f }
 
+fun isValidLutIntensity(intensity: Float): Boolean = intensity.isFinite() && intensity in 0f..1f
+
 fun isValidRgbCurves(values: List<Float>): Boolean =
     values.size == 9 && values.all { it.isFinite() && it in -0.2f..0.2f }
 
@@ -423,7 +425,8 @@ fun isValidProjectClipMetadata(
     highlightsTemperature: Float = 0f,
     highlightsTint: Float = 0f,
     hslMixer: List<Float> = List(8) { 0f },
-    rgbCurves: List<Float> = List(9) { 0f }
+    rgbCurves: List<Float> = List(9) { 0f },
+    lutIntensity: Float = 1f
 ): Boolean =
     id > 0L &&
         uriString.isNotBlank() &&
@@ -438,7 +441,8 @@ fun isValidProjectClipMetadata(
         isValidTint(tint) &&
         isValidColorWheels(shadowsTemperature, shadowsTint, midtonesTemperature, midtonesTint, highlightsTemperature, highlightsTint) &&
         isValidHslMixer(hslMixer) &&
-        isValidRgbCurves(rgbCurves)
+        isValidRgbCurves(rgbCurves) &&
+        isValidLutIntensity(lutIntensity)
 
 fun Clip.isValidProjectClip(): Boolean = isValidProjectClipMetadata(
     id, uri.toString(), durationMs, width, height, startMs, endMs, speed, volume, zoom,
@@ -446,7 +450,8 @@ fun Clip.isValidProjectClip(): Boolean = isValidProjectClipMetadata(
     redGain, greenGain, blueGain, tint,
     shadowsTemperature, shadowsTint, midtonesTemperature, midtonesTint, highlightsTemperature, highlightsTint,
     listOf(hslRed, hslOrange, hslYellow, hslGreen, hslAqua, hslBlue, hslPurple, hslMagenta),
-    listOf(redCurveShadows, redCurveMidtones, redCurveHighlights, greenCurveShadows, greenCurveMidtones, greenCurveHighlights, blueCurveShadows, blueCurveMidtones, blueCurveHighlights)
+    listOf(redCurveShadows, redCurveMidtones, redCurveHighlights, greenCurveShadows, greenCurveMidtones, greenCurveHighlights, blueCurveShadows, blueCurveMidtones, blueCurveHighlights),
+    lutIntensity
 )
 
 data class Clip(
@@ -512,6 +517,8 @@ data class Clip(
     val blueCurveHighlights: Float = 0f,
     /** Persisted document URI for an optional 3D .cube color LUT. */
     val lutUri: String? = null,
+    /** Blend between original image and imported LUT output; 0 disables the look, 1 is full strength. */
+    val lutIntensity: Float = 1f,
     val filter: Filter = Filter.None,
     val anim: Anim = Anim.None,
     val fadeInMs: Long = 0L,
@@ -553,6 +560,7 @@ fun Clip.toJson(): JSONObject = JSONObject().apply {
     put("gcs", greenCurveShadows.toDouble()); put("gcm", greenCurveMidtones.toDouble()); put("gch", greenCurveHighlights.toDouble())
     put("bcs", blueCurveShadows.toDouble()); put("bcm", blueCurveMidtones.toDouble()); put("bch", blueCurveHighlights.toDouble())
     put("lutUri", lutUri ?: JSONObject.NULL)
+    put("lutIntensity", lutIntensity.toDouble())
     put("filter", filter.name); put("anim", anim.name); put("fin", fadeInMs); put("fout", fadeOutMs)
     put("audioEq", JSONArray().apply { audioEqGainsDb.forEach { put(it.toDouble()) } })
     put("audioFadeIn", audioFadeInMs.coerceAtLeast(0L)); put("audioFadeOut", audioFadeOutMs.coerceAtLeast(0L))
@@ -649,6 +657,7 @@ fun clipFromJson(o: JSONObject): Clip {
         blueCurveMidtones = o.optDouble("bcm", 0.0).toFloat(),
         blueCurveHighlights = o.optDouble("bch", 0.0).toFloat(),
         lutUri = o.optString("lutUri").takeIf { it.isNotBlank() && it != "null" },
+        lutIntensity = o.optDouble("lutIntensity", 1.0).toFloat(),
         filter = runCatching { Filter.valueOf(o.getString("filter")) }.getOrDefault(Filter.None),
         anim = runCatching { Anim.valueOf(o.getString("anim")) }.getOrDefault(Anim.None),
         fadeInMs = o.optLong("fin", 0L), fadeOutMs = o.optLong("fout", 0L), layers = layers,
