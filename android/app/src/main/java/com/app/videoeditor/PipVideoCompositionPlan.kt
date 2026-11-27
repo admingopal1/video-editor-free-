@@ -6,10 +6,12 @@ private fun millisecondsToMicrosecondsSaturated(valueMs: Long): Long =
 /**
  * Stable input assignment for the future multi-source PIP compositor.
  *
- * Input 0 is reserved for the already-rendered primary timeline. PIP video inputs
- * are assigned from 1 in deterministic back-to-front layer order. This is planning
- * data only: export remains guarded until a compositor can guarantee the required
- * primary/background ordering and provide frames across each input's inactive gaps.
+ * Media3's official PIP example uses input 0 as the foreground overlay and the
+ * later input as the background. Therefore video overlays are planned first,
+ * from front to back, and the primary timeline is assigned the final input ID.
+ *
+ * This is planning data only: export remains guarded until an instrumented
+ * compositor test verifies multi-overlay z-order, inactive gaps, audio and clocks.
  */
 data class PipVideoInputPlan(
     val inputId: Int,
@@ -26,9 +28,21 @@ data class PipVideoInputPlan(
     }
 }
 
-fun buildPipVideoCompositionPlan(layers: List<OverlayClip>): List<PipVideoInputPlan> =
-    layers.asSequence()
+data class PipVideoCompositionPlan(
+    val videoInputs: List<PipVideoInputPlan>,
+    /** The base/primary timeline is last, matching Media3's documented PIP example. */
+    val primaryInputId: Int
+)
+
+fun buildPipVideoCompositionPlan(layers: List<OverlayClip>): PipVideoCompositionPlan {
+    val videoInputs = layers.asSequence()
         .filter { !it.isImage && it.isValidOverlayClip() }
-        .sortedWith(compareBy<OverlayClip> { it.layerOrder }.thenBy { it.id })
-        .mapIndexed { index, layer -> PipVideoInputPlan(index + 1, layer) }
+        // Media3 documents input 0 as foreground. Higher layerOrder is in front.
+        .sortedWith(compareByDescending<OverlayClip> { it.layerOrder }.thenBy { it.id })
+        .mapIndexed { index, layer -> PipVideoInputPlan(index, layer) }
         .toList()
+    return PipVideoCompositionPlan(
+        videoInputs = videoInputs,
+        primaryInputId = videoInputs.size
+    )
+}
