@@ -461,6 +461,28 @@ private fun Timeline(
                         contentAlignment = Alignment.Center
                     ) { Ico(Ic.Plus, Color.White, 22.dp) }
                 }
+                // PIP photo lanes: separate from the primary clip track and existing text/audio lanes.
+                if (vm.overlayClips.isNotEmpty()) {
+                    val pipRows = vm.overlayClips.size.coerceAtMost(4)
+                    Box(Modifier.padding(top = 4.dp).width(totalDp.dp).height((pipRows * 26).dp)) {
+                        vm.overlayClips.forEachIndexed { index, layer ->
+                            val x = (layer.timelineStartMs / 1000f * dpPerSec).coerceIn(0f, totalDp)
+                            val remainingWidth = (totalDp - x).coerceAtLeast(24f)
+                            val w = (layer.outputMs / 1000f * dpPerSec).coerceAtLeast(36f).coerceAtMost(remainingWidth)
+                            Box(
+                                Modifier.offset(x = x.dp, y = ((index % pipRows) * 26).dp)
+                                    .width(w.dp).height(23.dp)
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(Brush.horizontalGradient(listOf(Color(0xFF087E8B), Color(0xFF4F46E5))))
+                                    .clickable { vm.selectedOverlayId = layer.id }
+                                    .padding(horizontal = 6.dp),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                Text("▣ PIP · ${layer.name}", fontSize = 10.sp, maxLines = 1, color = Color.White)
+                            }
+                        }
+                    }
+                }
                 // text + sticker track: each layer sits at its own time range inside its clip
                 if (vm.clips.any { it.layers.isNotEmpty() }) {
                     val rows = vm.clips.maxOf { minOf(it.layers.size, 3) }.coerceAtLeast(1)
