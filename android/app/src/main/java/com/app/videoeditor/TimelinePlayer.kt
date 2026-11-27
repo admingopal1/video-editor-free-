@@ -320,9 +320,9 @@ class TimelinePlayer(
         val tracks = audioProvider()
         val ids = tracks.map { it.id }.toSet()
         audioPlayers.keys.filter { it !in ids }.forEach { id -> audioPlayers.remove(id)?.release() }
-        val voiceovers = tracks.filter { it.isVoiceover }
+        val voiceovers = tracks.filter { it.isVoiceover && !it.muted }
         val voiceWaveforms = voiceovers.mapNotNull { voice -> waveformProvider(voice.uri)?.let { voice.id to it } }.toMap()
-        val cacheKey = tracks.joinToString("|") { "${it.id}:${it.offsetMs}:${it.trimStartMs}:${it.trimEndMs}:${it.isVoiceover}:${it.autoDuck}:${it.noiseGateEnabled}:${it.noiseGateThreshold}:${waveformProvider(it.uri)?.let { wave -> System.identityHashCode(wave) } ?: 0}" }
+        val cacheKey = tracks.joinToString("|") { "${it.id}:${it.offsetMs}:${it.trimStartMs}:${it.trimEndMs}:${it.isVoiceover}:${it.autoDuck}:${it.noiseGateEnabled}:${it.noiseGateThreshold}:${it.muted}:${waveformProvider(it.uri)?.let { wave -> System.identityHashCode(wave) } ?: 0}" }
         if (cacheKey != duckingCacheKey) {
             duckingCacheKey = cacheKey
             duckingCache = tracks.filter { it.autoDuck && !it.isVoiceover }.associate { track ->
