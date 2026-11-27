@@ -1481,8 +1481,13 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
                 vm.updateAudio(t.id) { it.copy(fadeOutMs = (v * 100f).toLong() * 10L, loop = false) }
             }
             val orderedAudio = vm.audioTracks.sortedWith(compareBy<AudioTrack> { it.offsetMs }.thenBy { it.id })
-            val hasNextAudio = orderedAudio.indexOfFirst { it.id == t.id } in 0 until orderedAudio.lastIndex
+            val orderedIndex = orderedAudio.indexOfFirst { it.id == t.id }
+            val hasNextAudio = orderedIndex in 0 until orderedAudio.lastIndex
             if (hasNextAudio) {
+                val nextTrack = orderedAudio[orderedIndex + 1]
+                val outgoingDurationMs = (vm.waves[t.uri.toString()]?.size ?: 0) * 100L
+                val incomingDurationMs = (vm.waves[nextTrack.uri.toString()]?.size ?: 0) * 100L
+                val canCrossfade = outgoingDurationMs > t.trimStartMs && incomingDurationMs > nextTrack.trimStartMs
                 OutlinedButton(onClick = {
                     val durations = vm.audioTracks.associate { track ->
                         track.id to ((vm.waves[track.uri.toString()]?.size ?: 0) * 100L)
@@ -1497,8 +1502,8 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
                             vm.updateAudio(original.id) { it.copy(offsetMs = changed.offsetMs, trimEndMs = changed.trimEndMs, fadeInMs = changed.fadeInMs, fadeOutMs = changed.fadeOutMs, loop = changed.loop) }
                         }
                     }
-                }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Crossfade into next track · 2s")
+                }, enabled = canCrossfade, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (canCrossfade) "Crossfade into next track · 2s" else "Load both waveforms to enable crossfade")
                 }
             }
             if (t.loop && (t.fadeInMs > 0L || t.fadeOutMs > 0L || t.gainPoints.isNotEmpty())) {
