@@ -74,3 +74,8 @@ Implement a dedicated video-layer compositor/export path (or a verified Media3 c
 ## Implementation rule
 
 Do not weaken `EditorViewModel.preflight()` until the compositor and audio mixer pass the acceptance tests. A visible warning is preferable to an export that silently omits PIP video or audio.
+## Current verification boundary
+
+- The pure PIP composition-plan unit tests passed in CI on commit `a52ed260afdc5dff3552d4313f7c1d897b30402b` (Build #279). They cover deterministic input IDs/order, exclusion of still images and invalid layers, source-clock mapping, exclusive end timing, and saturated timestamp conversion.
+- The follow-up documentation commit `db0cdfcc3afb5738b85a49e62efbca63a5bc4ce6` is one commit later than that successful build. The current PR head therefore still needs its own CI run before it is marked fully verified.
+- These JVM tests validate planning math only; they do not validate actual Media3 frame compositing, inactive gaps, multi-layer z-order, independent audio mixing, cancellation, or device compatibility. Keep PIP-video export disabled until the acceptance checks above pass.
