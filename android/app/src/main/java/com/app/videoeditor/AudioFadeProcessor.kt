@@ -19,6 +19,9 @@ class AudioFadeProcessor(
     private var durationFrames = 0L
     private var fadeInFrames = 0L
     private var fadeOutFrames = 0L
+    private val gainCursor = AudioGainEnvelopeCursor(gainPoints)
+    private val duckCursor = AudioGainEnvelopeCursor(duckingPoints)
+    private val gateCursor = AudioGainEnvelopeCursor(noiseGatePoints)
 
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
         if (fadeInMs <= 0L && fadeOutMs <= 0L && gainPoints.isEmpty() && duckingPoints.isEmpty() && noiseGatePoints.isEmpty()) return AudioProcessor.AudioFormat.NOT_SET
@@ -44,9 +47,9 @@ class AudioFadeProcessor(
                 ((durationFrames - frameIndex).toFloat() / fadeOutFrames).coerceIn(0f, 1f)
             } else 1f
             val elapsedMs = (frameIndex * 1000L) / inputAudioFormat.sampleRate.coerceAtLeast(1)
-            val keyframeGain = audioKeyframeGainAt(gainPoints, elapsedMs)
-            val duckGain = audioKeyframeGainAt(duckingPoints, elapsedMs)
-            val gateGain = audioKeyframeGainAt(noiseGatePoints, elapsedMs)
+            val keyframeGain = gainCursor.gainAt(elapsedMs)
+            val duckGain = duckCursor.gainAt(elapsedMs)
+            val gateGain = gateCursor.gainAt(elapsedMs)
             val gain = minOf(fadeInGain, fadeOutGain) * keyframeGain * duckGain * gateGain
             repeat(channels) {
                 if (isFloat) {
@@ -64,5 +67,8 @@ class AudioFadeProcessor(
 
     override fun onFlush() {
         frameIndex = 0L
+        gainCursor.reset()
+        duckCursor.reset()
+        gateCursor.reset()
     }
 }
