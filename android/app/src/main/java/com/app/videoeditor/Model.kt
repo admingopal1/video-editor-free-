@@ -77,13 +77,15 @@ fun audioKeyframeGainAt(points: List<AudioGainPoint>, elapsedMs: Long): Float {
     return (a.gain + (b.gain - a.gain) * fraction).coerceIn(0f, 2f)
 }
 
+data class VoiceoverActivity(val id: Long, val offsetMs: Long, val trimStartMs: Long, val trimEndMs: Long)
+
 /**
  * Builds a shared timeline ducking envelope from decoded voiceover waveform buckets.
  * Waveform buckets are 100 ms; gain ramps down quickly on speech and releases more slowly.
  * Returned point times are relative to the background track's timeline offset.
  */
 fun buildVoiceDuckingPoints(
-    voiceovers: List<AudioTrack>,
+    voiceovers: List<VoiceoverActivity>,
     waveforms: Map<Long, FloatArray>,
     totalMs: Long,
     backgroundOffsetMs: Long,

@@ -1046,7 +1046,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val (w, h) = outputSize()
         val layout = if (fill) Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP else Presentation.LAYOUT_SCALE_TO_FIT
         val duckingPoints = audioTracks.filter { it.autoDuck && !it.isVoiceover }.associate { track ->
-            track.id to buildVoiceDuckingPoints(audioTracks.filter { it.isVoiceover }, voiceWaveforms, totalMs, track.offsetMs)
+            track.id to buildVoiceDuckingPoints(audioTracks.filter { it.isVoiceover }.map { VoiceoverActivity(it.id, it.offsetMs, it.trimStartMs, it.trimEndMs) }, voiceWaveforms, totalMs, track.offsetMs)
         }
         val comp = buildComposition(ctx, clips, Presentation.createForWidthAndHeight(w, h, layout), audioTracks, fps, overlayClips, duckingPoints)
         val out = File(ctx.cacheDir, "export_${System.currentTimeMillis()}.mp4")

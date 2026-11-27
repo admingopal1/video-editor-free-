@@ -124,7 +124,7 @@ class ModelLogicTest {
 
     @Test
     fun voiceDuckingFollowsVoiceoverOffsetAndReturnsTowardUnity() {
-        val voice = AudioTrack(id = 7L, uri = Uri.EMPTY, name = "Voiceover", offsetMs = 1_000L, isVoiceover = true)
+        val voice = VoiceoverActivity(id = 7L, offsetMs = 1_000L, trimStartMs = 0L, trimEndMs = Long.MAX_VALUE)
         val peaks = FloatArray(30) { index -> if (index in 0..5) 0.9f else 0f }
         val points = buildVoiceDuckingPoints(listOf(voice), mapOf(7L to peaks), 3_000L, 0L)
         assertEquals(1f, audioKeyframeGainAt(points, 0L), 0.0001f)

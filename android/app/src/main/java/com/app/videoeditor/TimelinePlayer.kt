@@ -324,7 +324,7 @@ class TimelinePlayer(
         if (cacheKey != duckingCacheKey) {
             duckingCacheKey = cacheKey
             duckingCache = tracks.filter { it.autoDuck && !it.isVoiceover }.associate { track ->
-                track.id to buildVoiceDuckingPoints(voiceovers, voiceWaveforms, totalMs(), track.offsetMs)
+                track.id to buildVoiceDuckingPoints(voiceovers.map { VoiceoverActivity(it.id, it.offsetMs, it.trimStartMs, it.trimEndMs) }, voiceWaveforms, totalMs(), track.offsetMs)
             }
         }
         for (t in tracks) {
