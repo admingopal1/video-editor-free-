@@ -431,7 +431,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                 // One malformed audio entry must not prevent recovery of the rest of the project.
                 val audioJson = aArr.optJSONObject(i)
                 val track = runCatching { audioJson?.let { audioFromJson(it) } }.getOrNull()
-                if (track == null || !audioIds.add(track.id) || !canOpen(track.uri)) {
+                if (track == null || !track.isValidProjectAudioTrack() || !audioIds.add(track.id) || !canOpen(track.uri)) {
                     dropped++
                     continue
                 }
