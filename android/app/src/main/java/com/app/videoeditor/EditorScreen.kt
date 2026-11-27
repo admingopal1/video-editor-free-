@@ -278,6 +278,13 @@ fun EditorScreen(vm: EditorViewModel) {
                     Slider(value = layer.opacity, onValueChange = { v -> vm.updateOverlay(layer.id) { it.copy(opacity = v) } }, valueRange = 0f..1f)
                     Text("Rotation · ${layer.rotation.toInt()}°")
                     Slider(value = layer.rotation, onValueChange = { v -> vm.updateOverlay(layer.id) { it.copy(rotation = v) } }, valueRange = -180f..180f)
+                    Text("Timeline start · ${fmt(layer.timelineStartMs)}")
+                    val maxStart = (vm.timeline.totalMs() - layer.outputMs).coerceAtLeast(0L)
+                    Slider(
+                        value = layer.timelineStartMs.toFloat(),
+                        onValueChange = { v -> vm.updateOverlay(layer.id) { it.copy(timelineStartMs = v.toLong().coerceIn(0L, maxStart)) } },
+                        valueRange = 0f..maxStart.coerceAtLeast(1L).toFloat()
+                    )
                     if (!layer.isImage) {
                         Text("Source in · ${fmt(layer.startMs)}")
                         Slider(
@@ -896,6 +903,7 @@ private fun PreviewStage(vm: EditorViewModel, modifier: Modifier, onAdd: () -> U
                 ).build()
             pipVideoPlayer.setMediaItem(item)
             pipVideoPlayer.setPlaybackParameters(PlaybackParameters(layer.speed))
+            pipVideoPlayer.volume = if (layer.muted) 0f else layer.volume.coerceIn(0f, 1f)
             pipVideoPlayer.prepare()
         }
     }
