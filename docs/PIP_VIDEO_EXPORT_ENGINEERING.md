@@ -79,3 +79,14 @@ Do not weaken `EditorViewModel.preflight()` until the compositor and audio mixer
 - The pure PIP composition-plan unit tests passed in CI on commit `a52ed260afdc5dff3552d4313f7c1d897b30402b` (Build #279). They cover deterministic input IDs/order, exclusion of still images and invalid layers, source-clock mapping, exclusive end timing, and saturated timestamp conversion.
 - The follow-up documentation commit `db0cdfcc3afb5738b85a49e62efbca63a5bc4ce6` is one commit later than that successful build. The current PR head therefore still needs its own CI run before it is marked fully verified.
 - These JVM tests validate planning math only; they do not validate actual Media3 frame compositing, inactive gaps, multi-layer z-order, independent audio mixing, cancellation, or device compatibility. Keep PIP-video export disabled until the acceptance checks above pass.
+
+## Media3 1.5.1 gap-support verification (2026-11-28)
+
+- The public `EditedMediaItemSequence.Builder.addGap(durationUs)` API describes a gap as a period with no media. API availability alone does not establish how a video gap is represented by Transformer during export.
+- The pinned dependency is Media3 1.5.1. Its version-specific release notes do not announce video-gap export support. The preceding 1.5.0 release notes explicitly announce export support for gaps in sequences of **audio** `EditedMediaItem`s only.
+- Therefore, do not treat `addGap()` as a verified transparent/empty video interval in Transformer 1.5.1. A secondary video gap could still yield an opaque blank frame or otherwise fail to preserve the primary image; this must be established by a real export, not inferred from the API name.
+- The next prototype must use a controlled test composition and inspect decoded output frames before/inside/after the PIP interval. If the gap path cannot prove transparent pass-through, use a compositor path that explicitly emits no PIP frame outside the layer's active interval (or another verified strategy).
+- Keep the preflight guard enabled until that test and the existing visual/audio/cancellation acceptance suite pass.
+
+Version-specific reference: Media3 release notes, 1.5.1 (2024-12-19) and 1.5.0 (2024-11-27): https://github.com/androidx/media/blob/release/RELEASENOTES.md#L1136-L1192
+API reference: https://developer.android.com/reference/androidx/media3/transformer/EditedMediaItemSequence.Builder#addGap(long)
