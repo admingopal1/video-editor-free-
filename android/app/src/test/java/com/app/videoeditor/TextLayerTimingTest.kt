@@ -60,10 +60,11 @@ class TextLayerTimingTest {
         assertEquals(10_000L, safeTiming.endMs)
     }
 
-    @Test fun malformedFractionsCanStillBeEditedSafely() {
+    @Test fun malformedFullClipLayerRemainsBoundedWhenEdited() {
         val malformed = layer(start = Float.NaN, end = Float.NaN)
         val moved = textLayerTiming(moveTextLayerTiming(malformed, 10_000L, 500L), 10_000L)
-        assertEquals(500L, moved.startMs)
+        // The safe fallback spans the full clip, so it cannot move without shortening it.
+        assertEquals(0L, moved.startMs)
         assertEquals(10_000L, moved.endMs)
     }
 
