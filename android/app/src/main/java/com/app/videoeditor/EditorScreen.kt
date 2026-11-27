@@ -268,6 +268,21 @@ fun EditorScreen(vm: EditorViewModel) {
             title = { Text((if (layer.isImage) "PIP photo · " else "PIP video · ") + layer.name) },
             text = {
                 Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                    val orderedLayers = vm.overlayClips.sortedWith(compareBy<OverlayClip> { it.layerOrder }.thenBy { it.id })
+                    val layerIndex = orderedLayers.indexOfFirst { it.id == layer.id }
+                    Text("Layer ${layerIndex + 1} of ${orderedLayers.size} · higher layers appear in front", color = Pal.textLo)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { vm.moveOverlayLayer(layer.id, -1) },
+                            enabled = layerIndex > 0,
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Send backward") }
+                        OutlinedButton(
+                            onClick = { vm.moveOverlayLayer(layer.id, 1) },
+                            enabled = layerIndex in 0 until orderedLayers.lastIndex,
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Bring forward") }
+                    }
                     Text("Size · ${(layer.scale * 100).toInt()}%")
                     Slider(value = layer.scale, onValueChange = { v -> vm.updateOverlay(layer.id) { it.copy(scale = v) } }, valueRange = 0.1f..0.8f)
                     Text("Horizontal · ${(layer.x * 100).toInt()}")
