@@ -22,10 +22,10 @@ fun snapOverlayTimelineStart(
     val candidates = boundariesMs.asSequence()
         .filter { it >= 0L && it <= total }
         .flatMap { boundary ->
-            sequenceOf(
-                boundary.coerceIn(0L, maxStart) to boundary,
-                (boundary - duration).coerceIn(0L, maxStart) to boundary
-            )
+            sequence {
+                if (boundary <= maxStart) yield(boundary to boundary)
+                if (boundary >= duration) yield((boundary - duration) to boundary)
+            }
         }
         .distinct()
         .map { (candidateStart, boundary) ->
