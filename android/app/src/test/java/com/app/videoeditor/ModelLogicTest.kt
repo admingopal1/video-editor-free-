@@ -231,4 +231,29 @@ class ModelLogicTest {
         assertEquals(0f, clampPcmFloatSample(Float.POSITIVE_INFINITY), 0.0001f)
     }
 
+
+    @Test
+    fun sequentialAudioEnvelopeCursorMatchesReferenceInterpolation() {
+        val points = listOf(
+            AudioGainPoint(200L, 0.25f),
+            AudioGainPoint(700L, 1.5f),
+            AudioGainPoint(1_400L, 0.4f),
+            AudioGainPoint(2_000L, 1.8f)
+        )
+        val cursor = AudioGainEnvelopeCursor(points)
+        val times = listOf(0L, 199L, 200L, 201L, 450L, 700L, 999L, 1_400L, 1_999L, 2_000L, 2_500L)
+        times.forEach { time ->
+            assertEquals(audioKeyframeGainAt(points, time), cursor.gainAt(time), 0.0001f)
+        }
+    }
+
+    @Test
+    fun sequentialAudioEnvelopeCursorCanResetForAReplayedExport() {
+        val points = listOf(AudioGainPoint(0L, 0.2f), AudioGainPoint(1_000L, 1.8f))
+        val cursor = AudioGainEnvelopeCursor(points)
+        assertEquals(1.8f, cursor.gainAt(1_000L), 0.0001f)
+        cursor.reset()
+        assertEquals(0.2f, cursor.gainAt(0L), 0.0001f)
+        assertEquals(1f, AudioGainEnvelopeCursor(emptyList()).gainAt(500L), 0.0001f)
+    }
 }
