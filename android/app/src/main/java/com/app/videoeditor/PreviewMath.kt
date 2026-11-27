@@ -75,7 +75,9 @@ fun textRender(layer: TextLayer, totalUs: Long, tUs: Long): TextRender {
     val timing = textLayerTiming(layer, (total / 1_000L).coerceAtLeast(0L))
     val startUs = (timing.startMs.toDouble() * 1_000.0).roundToLong().coerceIn(0L, total)
     val endUs = (timing.endMs.toDouble() * 1_000.0).roundToLong().coerceIn(startUs, total)
-    if (tUs < startUs || tUs > endUs) return TextRender(false, 0f, layer.scale, layer.y)
+    // Text intervals are end-exclusive when they stop before the clip ends, matching timeline lanes.
+    // Keep the final clip endpoint visible for full-clip layers because the preview can seek there.
+    if (tUs < startUs || (tUs >= endUs && endUs < total)) return TextRender(false, 0f, layer.scale, layer.y)
     val elapsedUs = (tUs - startUs).coerceAtLeast(0L)
     val a = (elapsedUs.toFloat() / TEXT_ANIM_US).coerceIn(0f, 1f)
     return when (layer.anim) {
