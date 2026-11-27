@@ -60,7 +60,8 @@ fun audioFadeGainAt(elapsedMs: Long, durationMs: Long, fadeInMs: Long, fadeOutMs
 fun audioKeyframeGainAt(points: List<AudioGainPoint>, elapsedMs: Long): Float {
     val sorted = points.sortedBy { it.timeMs }
     if (sorted.isEmpty()) return 1f
-    if (elapsedMs <= sorted.first().timeMs) return sorted.first().gain.coerceIn(0f, 2f)
+    if (elapsedMs < sorted.first().timeMs) return 1f
+    if (elapsedMs == sorted.first().timeMs) return sorted.first().gain.coerceIn(0f, 2f)
     if (elapsedMs >= sorted.last().timeMs) return sorted.last().gain.coerceIn(0f, 2f)
     val i = sorted.indexOfLast { it.timeMs <= elapsedMs }
     val a = sorted[i]
