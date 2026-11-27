@@ -891,6 +891,14 @@ private fun ToolPanel(
                 Switch(checked = c.muted, onCheckedChange = { m -> vm.update(id) { it.copy(muted = m) } })
             }
             Slide("Volume", c.volume, 0f..2f, "${(c.volume * 100).toInt()}%") { v -> vm.update(id) { it.copy(volume = v) } }
+            Text("Original audio fades", fontWeight = FontWeight.SemiBold)
+            Slide("Audio fade in", c.audioFadeInMs.toFloat(), 0f..5000f, "${c.audioFadeInMs} ms") { v ->
+                vm.update(id) { it.copy(audioFadeInMs = v.toLong().coerceIn(0L, 5000L)) }
+            }
+            Slide("Audio fade out", c.audioFadeOutMs.toFloat(), 0f..5000f, "${c.audioFadeOutMs} ms") { v ->
+                vm.update(id) { it.copy(audioFadeOutMs = v.toLong().coerceIn(0L, 5000L)) }
+            }
+            Text("Fades affect the clip's embedded audio, independently of its visual fade.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
             Text("Original clip audio EQ", fontWeight = FontWeight.SemiBold)
             Text("Adjusts sound embedded in this video clip; independent of music tracks.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
             Row(verticalAlignment = Alignment.CenterVertically) {
