@@ -391,12 +391,15 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         val overlays = mutableListOf<OverlayClip>()
+        val overlayIds = mutableSetOf<Long>()
         val overlayArray = o.optJSONArray("overlayClips")
         if (overlayArray != null) {
             for (i in 0 until overlayArray.length()) {
                 val overlayJson = overlayArray.optJSONObject(i)
                 val overlay = overlayJson?.let { overlayClipFromJson(it) }
-                if (overlay == null) {
+                if (overlay == null || !overlayIds.add(overlay.id)) {
+                    // Duplicate IDs make selection, updates and deletion ambiguous.
+                    // Keep the first valid occurrence and safely drop later duplicates.
                     dropped++
                     continue
                 }
