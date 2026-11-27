@@ -1,3 +1,7 @@
+import org.gradle.api.tasks.testing.TestDescriptor
+import org.gradle.api.tasks.testing.TestResult
+import org.gradle.kotlin.dsl.KotlinClosure2
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -59,4 +63,16 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
+}
+
+// On GitHub Actions, report every failed unit test (name + assertion message) as an annotation.
+tasks.withType<Test>().configureEach {
+    afterTest(KotlinClosure2<TestDescriptor, TestResult, Unit>({ d, r ->
+        if (r.resultType == TestResult.ResultType.FAILURE) {
+            val frame = r.exception?.stackTrace?.firstOrNull { it.className.startsWith("com.app.videoeditor") }
+            val msg = (r.exception?.message ?: r.exception.toString()).replace("\n", " ").take(300)
+            val at = if (frame != null) " at ${frame.fileName}:${frame.lineNumber}" else ""
+            println("::error title=Unit test failed::${d.className}.${d.name} -> $msg$at")
+        }
+    }))
 }
