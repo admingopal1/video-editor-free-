@@ -127,6 +127,35 @@ class PreviewMathTest {
     }
 
     @Test
+    fun malformedFullClipTimingMatchesStaticExportVisibility() {
+        val total = 4_000_000L
+        val malformed = layer(Float.NaN, Float.NaN, TextAnim.None)
+        assertFalse(requiresTimedTextOverlay(malformed, 4_000L))
+        assertTrue(textRender(malformed, total, 0L).visible)
+        assertTrue(textRender(malformed, total, 2_000_000L).visible)
+        assertTrue(textRender(malformed, total, total).visible)
+    }
+
+    @Test
+    fun malformedPartialTimingUsesTimedOverlayAndSharedPreviewRange() {
+        val total = 4_000_000L
+        val malformed = layer(Float.NaN, 0.5f, TextAnim.None)
+        assertTrue(requiresTimedTextOverlay(malformed, 4_000L))
+        assertTrue(textRender(malformed, total, 0L).visible)
+        assertTrue(textRender(malformed, total, 1_999_999L).visible)
+        assertFalse(textRender(malformed, total, 2_000_001L).visible)
+    }
+
+    @Test
+    fun infiniteTextTimingIsNormalizedConsistently() {
+        val total = 4_000_000L
+        val malformed = layer(Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY, TextAnim.None)
+        assertFalse(requiresTimedTextOverlay(malformed, 4_000L))
+        assertTrue(textRender(malformed, total, 0L).visible)
+        assertTrue(textRender(malformed, total, 3_000_000L).visible)
+    }
+
+    @Test
     fun fadeInAnimationRampsAlphaOverTheAnimationTime() {
         val total = 4_000_000L
         val l = layer(0.25f, 0.75f, TextAnim.Fade)

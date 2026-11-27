@@ -252,7 +252,7 @@ private fun timedOverlay(c: Clip, t: TextLayer): TextureOverlay {
 
 private fun textOverlays(c: Clip): List<TextureOverlay> =
     c.layers.filter { it.text.isNotBlank() }.map { t ->
-        if (t.startFrac > 0f || t.endFrac < 1f || t.anim != TextAnim.None) {
+        if (requiresTimedTextOverlay(t, c.outputMs)) {
             timedOverlay(c, t)
         } else {
             TextOverlay.createStaticTextOverlay(
