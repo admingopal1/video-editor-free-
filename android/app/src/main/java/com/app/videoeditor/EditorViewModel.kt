@@ -393,24 +393,34 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun loadFromJson(raw: String): Loaded? = runCatching {
         val o = JSONObject(raw)
-        val arr = o.getJSONArray("clips")
+        val arr = o.optJSONArray("clips") ?: JSONArray()
         val list = mutableListOf<Clip>()
+        val clipIds = mutableSetOf<Long>()
         val th = mutableMapOf<Long, Bitmap>()
         var dropped = 0
         for (i in 0 until arr.length()) {
-            val c = clipFromJson(arr.getJSONObject(i))
+            val clipJson = arr.optJSONObject(i)
+            val clip = runCatching { clipJson?.let { clipFromJson(it) } }.getOrNull()
+            if (clip == null || !clip.isValidProjectClip() || !clipIds.add(clip.id)) {
+                // A corrupt or duplicate clip must not make the entire project unrecoverable.
+                dropped++
+                continue
+            }
+            val c = clip
             if (c.isImage) {
-                val b = decodeBitmap(c.uri, 320)
-                if (b != null) { list += c; th[c.id] = b } else dropped++
+                val bitmap = runCatching { decodeBitmap(c.uri, 320) }.getOrNull()
+                if (bitmap != null) { list += c; th[c.id] = bitmap } else dropped++
             } else {
-                val r = MediaMetadataRetriever()
+                val retriever = MediaMetadataRetriever()
                 try {
-                    r.setDataSource(ctx, c.uri)
-                    r.getScaledFrameAtTime(c.startMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 240, 240)?.let { th[c.id] = it }
+                    retriever.setDataSource(ctx, c.uri)
+                    retriever.getScaledFrameAtTime(c.startMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 240, 240)?.let { th[c.id] = it }
                     list += c
                 } catch (e: Exception) {
                     dropped++
-                } finally { r.release() }
+                } finally {
+                    runCatching { retriever.release() }
+                }
             }
         }
         val tracks = mutableListOf<AudioTrack>()
