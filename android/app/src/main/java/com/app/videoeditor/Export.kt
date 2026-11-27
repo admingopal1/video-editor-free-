@@ -433,8 +433,8 @@ fun buildComposition(
             .setRemoveVideo(true)
              .setEffects(Effects(buildList {
                 if (t.volume != 1f) add(volumeProcessor(t.volume))
-                if (t.fadeInMs > 0L || t.fadeOutMs > 0L) {
-                    add(AudioFadeProcessor(t.fadeInMs, t.fadeOutMs, (effectiveEnd - t.trimStartMs).coerceAtLeast(0L)))
+                if (t.fadeInMs > 0L || t.fadeOutMs > 0L || t.gainPoints.isNotEmpty()) {
+                    add(AudioFadeProcessor(t.fadeInMs, t.fadeOutMs, (effectiveEnd - t.trimStartMs).coerceAtLeast(0L), t.gainPoints))
                 }
             }, emptyList()))
             .build()
