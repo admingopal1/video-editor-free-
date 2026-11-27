@@ -592,6 +592,54 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---------- secondary visual layers (additive PIP photo support) ----------
+    fun addOverlayImage(uri: Uri) {
+        viewModelScope.launch {
+            val bitmap = withContext(Dispatchers.IO) { decodeBitmap(uri, 1200) }
+            if (bitmap == null) {
+                toast("Could not read this overlay image")
+                return@launch
+            }
+            val remaining = (timeline.totalMs() - timeMs).coerceAtLeast(1_000L)
+            record(true)
+            overlayClips = overlayClips + OverlayClip(
+                id = nextId++,
+                uriString = uri.toString(),
+                name = displayName(uri),
+                durationMs = remaining,
+                width = bitmap.width,
+                height = bitmap.height,
+                startMs = 0L,
+                endMs = remaining,
+                timelineStartMs = timeMs,
+                isImage = true,
+                scale = 0.32f,
+                layerOrder = overlayClips.size
+            )
+            overlayBitmaps[uri.toString()] = bitmap
+            selectedOverlayId = overlayClips.last().id
+        }
+    }
+
+    val overlayBitmaps = mutableStateMapOf<String, Bitmap>()
+    var selectedOverlayId by mutableStateOf<Long?>(null)
+
+    fun overlayBitmap(uriString: String): Bitmap? = overlayBitmaps[uriString]
+        ?: decodeBitmap(Uri.parse(uriString), 1200)?.also { overlayBitmaps[uriString] = it }
+
+    fun updateOverlay(id: Long, change: (OverlayClip) -> OverlayClip) {
+        if (overlayClips.none { it.id == id }) return
+        record()
+        overlayClips = overlayClips.map { if (it.id == id) change(it) else it }
+    }
+
+    fun removeOverlay(id: Long) {
+        if (overlayClips.none { it.id == id }) return
+        record(true)
+        overlayClips = overlayClips.filterNot { it.id == id }
+        if (selectedOverlayId == id) selectedOverlayId = overlayClips.lastOrNull()?.id
+    }
+
     // ---------- clip operations ----------
     fun update(id: Long, f: (Clip) -> Clip) {
         record()
