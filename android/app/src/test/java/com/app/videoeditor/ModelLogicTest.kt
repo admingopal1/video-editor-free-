@@ -5,6 +5,23 @@ import org.junit.Test
 
 class ModelLogicTest {
     @Test
+    fun clipOriginalAudioEqRoundTripsAndLegacyProjectsDefaultToFlat() {
+        val original = Clip(
+            id = 91L,
+            uri = android.net.Uri.parse("content://test/video"),
+            durationMs = 12_000L,
+            width = 1920,
+            height = 1080,
+            audioEqGainsDb = listOf(5f, 3f, 0f, -2f, 1f)
+        )
+        val restored = clipFromJson(original.toJson())
+        assertEquals(original.audioEqGainsDb, restored.audioEqGainsDb)
+
+        val legacyJson = original.toJson().apply { remove("audioEq") }
+        assertEquals(List(5) { 0f }, clipFromJson(legacyJson).audioEqGainsDb)
+    }
+
+    @Test
     fun audioMuteAndSoloRulesAreConsistent() {
         assertEquals(true, isAudioTrackAudible(false, false, false))
         assertEquals(false, isAudioTrackAudible(true, false, false))
