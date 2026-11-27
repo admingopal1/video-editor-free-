@@ -368,7 +368,9 @@ data class Clip(
     val fadeOutMs: Long = 0L,
     val layers: List<TextLayer> = emptyList(),
     val keyframes: List<Keyframe> = emptyList(),
-    val audioEqGainsDb: List<Float> = List(5) { 0f }
+    val audioEqGainsDb: List<Float> = List(5) { 0f },
+    val audioFadeInMs: Long = 0L,
+    val audioFadeOutMs: Long = 0L
 ) {
     val trimmedMs: Long get() = trimmedDurationMs(startMs, endMs)
     val outputMs: Long get() = outputDurationMs(startMs, endMs, speed)
@@ -391,6 +393,7 @@ fun Clip.toJson(): JSONObject = JSONObject().apply {
     put("wa", warmth.toDouble()); put("hue", hue.toDouble())
     put("filter", filter.name); put("anim", anim.name); put("fin", fadeInMs); put("fout", fadeOutMs)
     put("audioEq", JSONArray().apply { audioEqGainsDb.forEach { put(it.toDouble()) } })
+    put("audioFadeIn", audioFadeInMs.coerceAtLeast(0L)); put("audioFadeOut", audioFadeOutMs.coerceAtLeast(0L))
     put("kf", JSONArray().apply {
         keyframes.forEach { k ->
             put(JSONObject().apply {
@@ -457,7 +460,9 @@ fun clipFromJson(o: JSONObject): Clip {
         anim = runCatching { Anim.valueOf(o.getString("anim")) }.getOrDefault(Anim.None),
         fadeInMs = o.optLong("fin", 0L), fadeOutMs = o.optLong("fout", 0L), layers = layers,
         keyframes = kfs.sortedBy { it.t },
-        audioEqGainsDb = AudioEqualizerProcessor.normalizeGains(o.optJSONArray("audioEq")?.let { a -> (0 until a.length()).map { i -> a.optDouble(i, 0.0).toFloat() } } ?: emptyList())
+        audioEqGainsDb = AudioEqualizerProcessor.normalizeGains(o.optJSONArray("audioEq")?.let { a -> (0 until a.length()).map { i -> a.optDouble(i, 0.0).toFloat() } } ?: emptyList()),
+        audioFadeInMs = o.optLong("audioFadeIn", 0L).coerceAtLeast(0L),
+        audioFadeOutMs = o.optLong("audioFadeOut", 0L).coerceAtLeast(0L)
     )
 }
 
