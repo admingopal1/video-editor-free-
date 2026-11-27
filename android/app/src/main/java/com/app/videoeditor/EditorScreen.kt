@@ -1060,23 +1060,25 @@ private fun PipVideoPreviewLayer(
         }
     }
 
-    AndroidView(
-        factory = { playerView },
-        modifier = Modifier
-            .align(Alignment.Center)
-            .offset(x = canvasW * (layer.x / 2f), y = -canvasH * (layer.y / 2f))
-            .size(
-                width = canvasW * layer.scale.coerceIn(0.05f, 0.95f),
-                height = canvasH * layer.scale.coerceIn(0.05f, 0.95f)
-            )
-            .graphicsLayer {
-                alpha = layer.opacity
-                rotationZ = -layer.rotation
-            }
-            .border(1.dp, Color.White.copy(alpha = 0.65f), RoundedCornerShape(6.dp))
-            .clickable(onClick = onSelect)
-            .zIndex(5f + layer.layerOrder)
-    )
+    Box(Modifier.fillMaxSize()) {
+        AndroidView(
+            factory = { playerView },
+            modifier = Modifier
+                .align(Alignment.Center)
+                .offset(x = canvasW * (layer.x / 2f), y = -canvasH * (layer.y / 2f))
+                .size(
+                    width = canvasW * layer.scale.coerceIn(0.05f, 0.95f),
+                    height = canvasH * layer.scale.coerceIn(0.05f, 0.95f)
+                )
+                .graphicsLayer {
+                    alpha = layer.opacity
+                    rotationZ = -layer.rotation
+                }
+                .border(1.dp, Color.White.copy(alpha = 0.65f), RoundedCornerShape(6.dp))
+                .clickable(onClick = onSelect)
+                .zIndex(5f + layer.layerOrder)
+        )
+    }
 }
 
 /**
