@@ -71,7 +71,17 @@ class PipVideoCompositionPlanTest {
 
         assertEquals(Long.MAX_VALUE, plan.timelineStartUs)
         assertEquals(Long.MAX_VALUE, plan.timelineEndUs)
-        assertEquals(Long.MAX_VALUE, plan.sourceTimeUs(Long.MAX_VALUE))
+        // This timestamp is before the saturated timeline start, so the input is inactive.
+        assertNull(plan.sourceTimeUs(Long.MAX_VALUE))
+
+        val lateSource = layer(7L, 0, timelineStartMs = 0L).copy(
+            durationMs = Long.MAX_VALUE,
+            startMs = Long.MAX_VALUE - 1_000L,
+            endMs = Long.MAX_VALUE
+        )
+        val sourcePlan = buildPipVideoCompositionPlan(listOf(lateSource)).single()
+        // A valid source timestamp near Long.MAX_VALUE must saturate when converted to microseconds.
+        assertEquals(Long.MAX_VALUE, sourcePlan.sourceTimeUs(500_000L))
     }
 
     @Test
