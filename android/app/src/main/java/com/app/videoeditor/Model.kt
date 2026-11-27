@@ -73,6 +73,48 @@ fun audioKeyframeGainAt(points: List<AudioGainPoint>, elapsedMs: Long): Float {
     return (a.gain + (b.gain - a.gain) * fraction).coerceIn(0f, 2f)
 }
 
+/**
+ * Builds a shared timeline ducking envelope from decoded voiceover waveform buckets.
+ * Waveform buckets are 100 ms; gain ramps down quickly on speech and releases more slowly.
+ * Returned point times are relative to the background track's timeline offset.
+ */
+fun buildVoiceDuckingPoints(
+    voiceovers: List<AudioTrack>,
+    waveforms: Map<Long, FloatArray>,
+    totalMs: Long,
+    backgroundOffsetMs: Long,
+    bucketMs: Long = 100L,
+    speechThreshold: Float = 0.12f,
+    duckGain: Float = 0.28f
+): List<AudioGainPoint> {
+    if (voiceovers.isEmpty() || waveforms.isEmpty() || totalMs <= backgroundOffsetMs) return emptyList()
+    val stepMs = bucketMs.coerceAtLeast(20L)
+    var gain = 1f
+    val points = mutableListOf<AudioGainPoint>()
+    var time = 0L
+    while (time <= totalMs) {
+        val speechActive = voiceovers.any { voice ->
+            val elapsed = time - voice.offsetMs
+            if (elapsed < 0L) false else {
+                val peaks = waveforms[voice.id]
+                val sourceMs = voice.trimStartMs + elapsed
+                val index = (sourceMs / stepMs).toInt()
+                peaks != null && index in peaks.indices && peaks[index] >= speechThreshold
+            }
+        }
+        val target = if (speechActive) duckGain.coerceIn(0f, 1f) else 1f
+        val blend = if (target < gain) (stepMs.toFloat() / 150f).coerceIn(0f, 1f)
+                    else (stepMs.toFloat() / 500f).coerceIn(0f, 1f)
+        gain += (target - gain) * blend
+        if (time >= backgroundOffsetMs) points += AudioGainPoint(time - backgroundOffsetMs, gain)
+        time += stepMs
+    }
+    if (points.isNotEmpty() && points.last().timeMs < totalMs - backgroundOffsetMs) {
+        points += AudioGainPoint(totalMs - backgroundOffsetMs, 1f)
+    }
+    return points
+}
+
 fun shouldDeleteStaleExportFile(fileName: String, lastModifiedMs: Long, cutoffMs: Long): Boolean =
     fileName.startsWith("export_") && lastModifiedMs < cutoffMs
 
