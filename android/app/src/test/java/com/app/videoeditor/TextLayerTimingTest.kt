@@ -12,7 +12,7 @@ class TextLayerTimingTest {
         val moved = moveTextLayerTiming(layer(), 10_000L, 1_000L)
         val timing = textLayerTiming(moved, 10_000L)
         assertEquals(3_000L, timing.startMs)
-        assertEquals(4_000L, timing.endMs)
+        assertEquals(7_000L, timing.endMs)
         val clamped = textLayerTiming(moveTextLayerTiming(layer(), 10_000L, Long.MAX_VALUE), 10_000L)
         assertEquals(6_000L, clamped.startMs)
         assertEquals(10_000L, clamped.endMs)
