@@ -222,4 +222,13 @@ class ModelLogicTest {
         assertEquals(1.1f, moved.last().gain, 0.0001f)
     }
 
+    @Test
+    fun pcmFloatSamplesAreClampedAndNonFiniteSamplesAreSilenced() {
+        assertEquals(1f, clampPcmFloatSample(1.5f), 0.0001f)
+        assertEquals(-1f, clampPcmFloatSample(-2f), 0.0001f)
+        assertEquals(0.25f, clampPcmFloatSample(0.25f), 0.0001f)
+        assertEquals(0f, clampPcmFloatSample(Float.NaN), 0.0001f)
+        assertEquals(0f, clampPcmFloatSample(Float.POSITIVE_INFINITY), 0.0001f)
+    }
+
 }
