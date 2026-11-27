@@ -28,6 +28,9 @@ data class Keyframe(
 
 data class AudioGainPoint(val timeMs: Long, val gain: Float)
 
+/** Keeps floating-point export samples inside the normalized PCM range; non-finite DSP output is silenced. */
+fun clampPcmFloatSample(sample: Float): Float = if (sample.isFinite()) sample.coerceIn(-1f, 1f) else 0f
+
 
 /** Whether a track should contribute to playback/export under the current mute/solo state. */
 fun isAudioTrackAudible(muted: Boolean, solo: Boolean, anyUnmutedSolo: Boolean): Boolean =
