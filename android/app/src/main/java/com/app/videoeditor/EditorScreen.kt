@@ -1542,6 +1542,18 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
                     vm.updateAudio(t.id) { it.copy(trimEndMs = (v * 10).toLong() * 100L, loop = false) }
                 }
             }
+            Text("5-band equalizer", fontWeight = FontWeight.SemiBold)
+            Text("Per-track PCM EQ · ±12 dB · same filter in preview and export", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            listOf("60 Hz · Bass", "230 Hz · Low mids", "910 Hz · Midrange", "3.6 kHz · Presence", "14 kHz · Treble").forEachIndexed { band, label ->
+                val gain = t.eqGainsDb.getOrNull(band) ?: 0f
+                Slide(label, gain, -12f..12f, String.format(Locale.US, "%+.1f dB", gain)) { value ->
+                    vm.updateAudio(t.id) { track ->
+                        val gains = AudioEqualizerProcessor.normalizeGains(track.eqGainsDb).toMutableList()
+                        gains[band] = value.coerceIn(-12f, 12f)
+                        track.copy(eqGainsDb = gains, loop = if (gains.any { it != 0f }) false else track.loop)
+                    }
+                }
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Volume automation", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
                 TextButton(onClick = {
