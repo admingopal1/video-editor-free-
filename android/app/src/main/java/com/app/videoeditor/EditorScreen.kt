@@ -585,14 +585,17 @@ private fun Timeline(
                 }
                 // PIP photo lanes: separate from the primary clip track and existing text/audio lanes.
                 if (vm.overlayClips.isNotEmpty()) {
-                    val pipRows = vm.overlayClips.size.coerceAtMost(4)
+                    val pipPlacements = assignOverlayLanes(vm.overlayClips)
+                    val pipLaneById = pipPlacements.associate { it.overlayId to it.lane }
+                    val pipRows = (pipPlacements.maxOfOrNull { it.lane } ?: 0) + 1
                     Box(Modifier.padding(top = 4.dp).width(totalDp.dp).height((pipRows * 26).dp)) {
-                        vm.overlayClips.forEachIndexed { index, layer ->
+                        vm.overlayClips.forEach { layer ->
+                            val lane = pipLaneById[layer.id] ?: 0
                             val x = (layer.timelineStartMs / 1000f * dpPerSec).coerceIn(0f, totalDp)
                             val remainingWidth = (totalDp - x).coerceAtLeast(24f)
                             val w = (layer.outputMs / 1000f * dpPerSec).coerceAtLeast(36f).coerceAtMost(remainingWidth)
                             Box(
-                                Modifier.offset(x = x.dp, y = ((index % pipRows) * 26).dp)
+                                Modifier.offset(x = x.dp, y = (lane * 26).dp)
                                     .width(w.dp).height(23.dp)
                                     .clip(RoundedCornerShape(7.dp))
                                     .background(Brush.horizontalGradient(listOf(Color(0xFF087E8B), Color(0xFF4F46E5))))
