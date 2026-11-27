@@ -129,6 +129,23 @@ fun audioFadeGainAt(elapsedMs: Long, durationMs: Long, fadeInMs: Long, fadeOutMs
 }
 
 /** Points must be sorted by time; project loading and editing normalize this once. */
+/** Moves one automation point by a timeline delta, keeping timestamps unique and non-negative. */
+fun moveAudioGainPoint(points: List<AudioGainPoint>, index: Int, deltaMs: Long): List<AudioGainPoint> {
+    if (index !in points.indices || deltaMs == 0L) return points
+    val occupied = points.filterIndexed { i, _ -> i != index }.map { it.timeMs }.toHashSet()
+    val current = points[index]
+    var target = if (deltaMs < 0L) (current.timeMs + deltaMs).coerceAtLeast(0L)
+        else (current.timeMs + deltaMs).coerceAtLeast(current.timeMs)
+    val step = if (deltaMs < 0L) -100L else 100L
+    while (target in occupied) {
+        val next = target + step
+        if (next < 0L || next > Long.MAX_VALUE - 100L) break
+        target = next
+    }
+    return points.mapIndexed { i, point -> if (i == index) point.copy(timeMs = target) else point }
+        .sortedBy { it.timeMs }
+}
+
 fun audioKeyframeGainAt(points: List<AudioGainPoint>, elapsedMs: Long): Float {
     if (points.isEmpty()) return 1f
     if (elapsedMs < points.first().timeMs) return 1f
