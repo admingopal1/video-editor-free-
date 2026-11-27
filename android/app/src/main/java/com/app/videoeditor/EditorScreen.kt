@@ -1430,6 +1430,16 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
                     vm.updateAudio(t.id) { it.copy(trimEndMs = (v * 10).toLong() * 100L, loop = false) }
                 }
             }
+            val fadeMaxSeconds = (if (dur > 0f) minOf(dur / 2f, 10f) else 10f).coerceAtLeast(0.1f)
+            Slide("Fade in", t.fadeInMs / 1000f, 0f..fadeMaxSeconds, String.format(Locale.US, "%.1fs", t.fadeInMs / 1000f)) { v ->
+                vm.updateAudio(t.id) { it.copy(fadeInMs = (v * 100f).toLong() * 10L, loop = false) }
+            }
+            Slide("Fade out", t.fadeOutMs / 1000f, 0f..fadeMaxSeconds, String.format(Locale.US, "%.1fs", t.fadeOutMs / 1000f)) { v ->
+                vm.updateAudio(t.id) { it.copy(fadeOutMs = (v * 100f).toLong() * 10L, loop = false) }
+            }
+            if (t.loop && (t.fadeInMs > 0L || t.fadeOutMs > 0L)) {
+                Text("Fades use a single audio segment, so looping is disabled when a fade is selected.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            }
             if (t.offsetMs == 0L) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Loop to fill the video", Modifier.weight(1f))
