@@ -50,6 +50,15 @@ class OverlayClipTest {
     }
 
     @Test
+    fun timelineEndSaturatesInsteadOfOverflowingLongRange() {
+        val layer = sample().copy(timelineStartMs = Long.MAX_VALUE - 500L)
+
+        assertEquals(Long.MAX_VALUE, layer.timelineEndMs)
+        assertTrue(layer.isVisibleAt(Long.MAX_VALUE - 1L))
+        assertFalse(layer.isVisibleAt(Long.MAX_VALUE))
+    }
+
+    @Test
     fun legacyStyleOverlayJsonUsesSafeDefaultsForOptionalProperties() {
         val json = JSONObject()
             .put("id", 9L)
