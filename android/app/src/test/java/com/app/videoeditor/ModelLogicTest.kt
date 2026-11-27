@@ -115,6 +115,14 @@ class ModelLogicTest {
     }
 
     @Test
+    fun audioGainAutomationStaysAtUnityBeforeFirstPoint() {
+        val points = listOf(AudioGainPoint(2_000L, 0.25f), AudioGainPoint(4_000L, 1.5f))
+        assertEquals(1f, audioKeyframeGainAt(points, 0L), 0.0001f)
+        assertEquals(1f, audioKeyframeGainAt(points, 1_999L), 0.0001f)
+        assertEquals(0.25f, audioKeyframeGainAt(points, 2_000L), 0.0001f)
+    }
+
+    @Test
     fun emptyAudioGainKeyframesKeepUnityGain() {
         assertEquals(1f, audioKeyframeGainAt(emptyList(), 500L), 0.0001f)
     }
