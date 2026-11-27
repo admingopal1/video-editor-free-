@@ -53,12 +53,30 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
+
 import org.json.JSONObject
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
 @OptIn(FlowPreview::class)
+internal fun calculateProjectDurationMs(segments: List<Triple<Long, Long, Double>>): Long {
+    var total = 0L
+    for ((startMs, endMs, speed) in segments) {
+        if (startMs < 0L || endMs <= startMs || !speed.isFinite() || speed <= 0.0) continue
+        val sourceDuration = endMs - startMs
+        val outputDuration = sourceDuration.toDouble() / speed
+        val durationMs = if (!outputDuration.isFinite() || outputDuration >= Long.MAX_VALUE.toDouble()) {
+            Long.MAX_VALUE
+        } else {
+            outputDuration.toLong().coerceAtLeast(0L)
+        }
+        total = if (durationMs > Long.MAX_VALUE - total) Long.MAX_VALUE else total + durationMs
+        if (total == Long.MAX_VALUE) break
+    }
+    return total
+}
+
 class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private val ctx get() = getApplication<Application>()
     private val prefs = ctx.getSharedPreferences("project", Context.MODE_PRIVATE)
@@ -346,12 +364,17 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                 runCatching {
                     val o = JSONObject(f.readText())
                     val arr = o.optJSONArray("clips")
-                    var dur = 0L
+                    val segments = mutableListOf<Triple<Long, Long, Double>>()
                     if (arr != null) for (i in 0 until arr.length()) {
-                        val c = arr.getJSONObject(i)
-                        dur += ((c.getLong("end") - c.getLong("start")) / c.optDouble("speed", 1.0)).toLong()
+                        val clip = arr.optJSONObject(i) ?: continue
+                        segments += Triple(
+                            clip.optLong("start", -1L),
+                            clip.optLong("end", -1L),
+                            clip.optDouble("speed", 1.0)
+                        )
                     }
-                    ProjectInfo(f.nameWithoutExtension, o.optString("name", "Untitled"), o.optLong("updated", f.lastModified()), arr?.length() ?: 0, dur)
+                    val duration = calculateProjectDurationMs(segments)
+                    ProjectInfo(f.nameWithoutExtension, o.optString("name", "Untitled"), o.optLong("updated", f.lastModified()), arr?.length() ?: 0, duration)
                 }.getOrNull()
             }.sortedByDescending { it.updated }
         }
