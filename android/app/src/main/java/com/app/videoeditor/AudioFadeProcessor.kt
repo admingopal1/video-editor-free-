@@ -10,7 +10,8 @@ import kotlin.math.roundToInt
 class AudioFadeProcessor(
     private val fadeInMs: Long,
     private val fadeOutMs: Long,
-    private val durationMs: Long
+    private val durationMs: Long,
+    private val gainPoints: List<AudioGainPoint> = emptyList()
 ) : BaseAudioProcessor() {
     private var frameIndex = 0L
     private var durationFrames = 0L
@@ -18,7 +19,7 @@ class AudioFadeProcessor(
     private var fadeOutFrames = 0L
 
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
-        if (fadeInMs <= 0L && fadeOutMs <= 0L) return AudioProcessor.AudioFormat.NOT_SET
+        if (fadeInMs <= 0L && fadeOutMs <= 0L && gainPoints.isEmpty()) return AudioProcessor.AudioFormat.NOT_SET
         if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT &&
             inputAudioFormat.encoding != C.ENCODING_PCM_FLOAT
         ) return AudioProcessor.AudioFormat.NOT_SET
@@ -40,7 +41,9 @@ class AudioFadeProcessor(
             val fadeOutGain = if (fadeOutFrames > 0L && durationFrames > 0L) {
                 ((durationFrames - frameIndex).toFloat() / fadeOutFrames).coerceIn(0f, 1f)
             } else 1f
-            val gain = minOf(fadeInGain, fadeOutGain)
+            val elapsedMs = (frameIndex * 1000L) / inputAudioFormat.sampleRate.coerceAtLeast(1)
+            val keyframeGain = audioKeyframeGainAt(gainPoints, elapsedMs)
+            val gain = minOf(fadeInGain, fadeOutGain) * keyframeGain
             repeat(channels) {
                 if (isFloat) {
                     output.putFloat(inputBuffer.float * gain)
