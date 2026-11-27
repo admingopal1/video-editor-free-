@@ -320,6 +320,59 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     private val projectSaveMutex = Mutex()
 
+    /** Reconnects one unavailable source while preserving its saved edit metadata. */
+    fun relinkMissingMedia(itemId: Long, uri: Uri) {
+        val item = missingMediaItems.firstOrNull { it.id == itemId } ?: return
+        viewModelScope.launch {
+            try {
+                val mime = ctx.contentResolver.getType(uri).orEmpty()
+                val validType = when (item.kind) {
+                    "audio" -> mime.startsWith("audio/")
+                    "clip" -> if (mime.startsWith("image/")) true else mime.startsWith("video/")
+                    "overlay" -> true
+                    else -> false
+                }
+                if (!validType || !canOpen(uri)) {
+                    toast("Choose a readable \${item.kind} file of the same media type.")
+                    return@launch
+                }
+                val source = recoverySourceJson ?: return@launch
+                val root = JSONObject(source)
+                val arrayKey = when (item.kind) {
+                    "clip" -> "clips"
+                    "audio" -> "audio"
+                    "overlay" -> "overlayClips"
+                    else -> return@launch
+                }
+                val entries = root.optJSONArray(arrayKey) ?: return@launch
+                var replaced = false
+                for (i in 0 until entries.length()) {
+                    val entry = entries.optJSONObject(i) ?: continue
+                    if (entry.optLong("id", Long.MIN_VALUE) == item.id) {
+                        entry.put("uri", uri.toString())
+                        replaced = true
+                        break
+                    }
+                }
+                if (!replaced) {
+                    toast("The original media entry could not be found. Original backup is preserved.")
+                    return@launch
+                }
+                val updatedSource = root.toString()
+                val loaded = withContext(Dispatchers.IO) { loadFromJson(updatedSource) }
+                if (loaded == null || loaded.missing.any { it.kind == item.kind && it.id == item.id }) {
+                    toast("That file could not restore this media item. Try the original source file.")
+                    return@launch
+                }
+                recoverySourceJson = updatedSource.takeIf { loaded.dropped > 0 }
+                applyLoaded(projectId, loaded)
+                toast(if (loaded.dropped == 0) "All available media reconnected. You can save the project now." else "Media reconnected. \${loaded.missing.size} source(s) still need relinking.")
+            } catch (e: Exception) {
+                toast(e.message ?: "Could not relink this media. Original backup is preserved.")
+            }
+        }
+    }
+
     /** Explicitly accepts a recovered project after missing source media was skipped. */
     fun saveRecoveredProject() {
         if (!missingMediaRecoveryPending) return
@@ -406,7 +459,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun projectThumb(id: String): Bitmap? = BitmapFactory.decodeFile(File(projectsDir, "$id.jpg").path)
 
-    private data class MissingMediaItem(val kind: String, val id: Long, val name: String)
+    data class MissingMediaItem(val kind: String, val id: Long, val name: String)
 
     private class Loaded(val o: JSONObject, val clips: List<Clip>, val thumbs: Map<Long, Bitmap>, val dropped: Int, val audio: List<AudioTrack>, val overlays: List<OverlayClip>, val missing: List<MissingMediaItem>, val raw: String)
 
