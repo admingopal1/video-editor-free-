@@ -29,7 +29,7 @@ class CubeLutTest {
     }
 
     @Test fun clampsInputsToDeclaredDomain() {
-        val text = identityCube().replace("LUT_3D_SIZE 2", "DOMAIN_MIN 0 0 0\\nDOMAIN_MAX 1 1 1\\nLUT_3D_SIZE 2")
+        val text = identityCube().replace("LUT_3D_SIZE 2", "DOMAIN_MIN 0 0 0\nDOMAIN_MAX 1 1 1\nLUT_3D_SIZE 2")
         val lut = CubeLut.parse(text)
         assertArrayEquals(floatArrayOf(0f, 1f, 0f), lut.sample(-2f, 3f, 0f), 0.0001f)
     }
@@ -45,7 +45,7 @@ class CubeLutTest {
     @Test fun media3CubeBakesDeclaredDomainAndClampsOutput() {
         val text = identityCube().replace(
             "LUT_3D_SIZE 2",
-            "DOMAIN_MIN 0.25 0.25 0.25\\nDOMAIN_MAX 0.75 0.75 0.75\\nLUT_3D_SIZE 2"
+            "DOMAIN_MIN 0.25 0.25 0.25\nDOMAIN_MAX 0.75 0.75 0.75\nLUT_3D_SIZE 2"
         )
         val cube = CubeLut.parse(text).toMedia3ArgbCube()
         assertEquals(0xFF000000.toInt(), cube[0][0][0])
@@ -54,15 +54,15 @@ class CubeLutTest {
 
     @Test fun rejectsMissingOrIncorrectEntryCount() {
         assertInvalid("TITLE missing size")
-        assertInvalid("LUT_3D_SIZE 2\\n0 0 0")
+        assertInvalid("LUT_3D_SIZE 2\n0 0 0")
     }
 
     @Test fun rejectsMalformedAndUnsupportedData() {
-        assertInvalid("LUT_3D_SIZE 2\\n0 0 NaN")
-        assertInvalid("LUT_3D_SIZE 2\\nLUT_1D_SIZE 2")
+        assertInvalid("LUT_3D_SIZE 2\n0 0 NaN")
+        assertInvalid("LUT_3D_SIZE 2\nLUT_1D_SIZE 2")
         assertInvalid("LUT_3D_SIZE 65")
-        assertInvalid("LUT_3D_SIZE 2\\nDOMAIN_MIN 1 0 0\\nDOMAIN_MAX 1 1 1")
-        assertInvalid("LUT_3D_SIZE 2\\n0 0 0 1")
+        assertInvalid("LUT_3D_SIZE 2\nDOMAIN_MIN 1 0 0\nDOMAIN_MAX 1 1 1")
+        assertInvalid("LUT_3D_SIZE 2\n0 0 0 1")
     }
 
     private fun assertInvalid(text: String) {
