@@ -49,15 +49,25 @@ data class AudioTrack(
 
 fun trimmedDurationMs(startMs: Long, endMs: Long): Long = (endMs - startMs).coerceAtLeast(0L)
 
-/** Applies a two-track crossfade by aligning the next track to the outgoing track's end. */
+data class AudioCrossfadeState(
+    val id: Long,
+    val offsetMs: Long,
+    val trimStartMs: Long,
+    val trimEndMs: Long,
+    val fadeInMs: Long,
+    val fadeOutMs: Long,
+    val loop: Boolean
+)
+
+/** Pure timeline calculation so crossfade behavior can be tested without Android Uri. */
 fun configureAudioCrossfade(
-    tracks: List<AudioTrack>,
+    tracks: List<AudioCrossfadeState>,
     outgoingId: Long,
     sourceDurationsMs: Map<Long, Long>,
     requestedMs: Long
-): List<AudioTrack> {
+): List<AudioCrossfadeState> {
     if (requestedMs <= 0L) return tracks
-    val ordered = tracks.sortedWith(compareBy<AudioTrack> { it.offsetMs }.thenBy { it.id })
+    val ordered = tracks.sortedWith(compareBy<AudioCrossfadeState> { it.offsetMs }.thenBy { it.id })
     val index = ordered.indexOfFirst { it.id == outgoingId }
     if (index < 0 || index >= ordered.lastIndex) return tracks
     val outgoing = ordered[index]

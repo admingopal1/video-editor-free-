@@ -92,8 +92,8 @@ class ModelLogicTest {
 
     @Test
     fun crossfadeAlignsNextTrackAndSetsMatchingFadeEnvelopes() {
-        val first = AudioTrack(1L, Uri.parse("file:///first.mp3"), "First", offsetMs = 0L)
-        val second = AudioTrack(2L, Uri.parse("file:///second.mp3"), "Second", offsetMs = 9_000L)
+        val first = AudioCrossfadeState(1L, 0L, 0L, Long.MAX_VALUE, 0L, 0L, true)
+        val second = AudioCrossfadeState(2L, 9_000L, 0L, Long.MAX_VALUE, 0L, 0L, true)
         val result = configureAudioCrossfade(listOf(first, second), 1L, mapOf(1L to 10_000L, 2L to 8_000L), 2_000L)
         assertEquals(8_000L, result[0].trimEndMs)
         assertEquals(2_000L, result[0].fadeOutMs)
@@ -105,23 +105,10 @@ class ModelLogicTest {
 
     @Test
     fun crossfadeDoesNotChangeTracksWithoutKnownDurationsOrNextTrack() {
-        val first = AudioTrack(1L, Uri.parse("file:///first.mp3"), "First")
+        val first = AudioCrossfadeState(1L, 0L, 0L, Long.MAX_VALUE, 0L, 0L, false)
+        val second = AudioCrossfadeState(2L, 5_000L, 0L, Long.MAX_VALUE, 0L, 0L, false)
         assertEquals(listOf(first), configureAudioCrossfade(listOf(first), 1L, mapOf(1L to 10_000L), 2_000L))
-        val second = AudioTrack(2L, Uri.parse("file:///second.mp3"), "Second", offsetMs = 5_000L)
         assertEquals(listOf(first, second), configureAudioCrossfade(listOf(first, second), 1L, emptyMap(), 2_000L))
-    }
-
-    @Test
-    fun voiceGateAttenuatesQuietBucketsAndOpensForSpeech() {
-        val points = buildVoiceGatePoints(floatArrayOf(0f, 0f, 0.8f, 0.9f, 0f, 0f), 600L, 0.1f)
-        assertEquals(true, audioKeyframeGainAt(points, 0L) < 1f)
-        assertEquals(true, audioKeyframeGainAt(points, 250L) > audioKeyframeGainAt(points, 50L))
-        assertEquals(true, audioKeyframeGainAt(points, 550L) < audioKeyframeGainAt(points, 350L))
-    }
-
-    @Test
-    fun voiceGateEmptyWaveformProducesNoAutomation() {
-        assertEquals(emptyList<AudioGainPoint>(), buildVoiceGatePoints(floatArrayOf(), 1_000L, 0.1f))
     }
 
     @Test

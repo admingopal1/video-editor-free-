@@ -1487,9 +1487,16 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
                     val durations = vm.audioTracks.associate { track ->
                         track.id to ((vm.waves[track.uri.toString()]?.size ?: 0) * 100L)
                     }
-                    val updated = configureAudioCrossfade(vm.audioTracks, t.id, durations, 2_000L)
-                    updated.filterIndexed { index, track -> track != vm.audioTracks[index] }
-                        .forEach { changed -> vm.updateAudio(changed.id) { changed } }
+                    val states = vm.audioTracks.map { track ->
+                        AudioCrossfadeState(track.id, track.offsetMs, track.trimStartMs, track.trimEndMs, track.fadeInMs, track.fadeOutMs, track.loop)
+                    }
+                    val updated = configureAudioCrossfade(states, t.id, durations, 2_000L).associateBy { it.id }
+                    vm.audioTracks.forEach { original ->
+                        val changed = updated[original.id] ?: return@forEach
+                        if (changed != AudioCrossfadeState(original.id, original.offsetMs, original.trimStartMs, original.trimEndMs, original.fadeInMs, original.fadeOutMs, original.loop)) {
+                            vm.updateAudio(original.id) { it.copy(offsetMs = changed.offsetMs, trimEndMs = changed.trimEndMs, fadeInMs = changed.fadeInMs, fadeOutMs = changed.fadeOutMs, loop = changed.loop) }
+                        }
+                    }
                 }, modifier = Modifier.fillMaxWidth()) {
                     Text("Crossfade into next track · 2s")
                 }
