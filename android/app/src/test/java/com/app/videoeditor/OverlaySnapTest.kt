@@ -15,7 +15,7 @@ class OverlaySnapTest {
     @Test
     fun snapsOverlayEndToNearbyBoundary() {
         assertEquals(
-            OverlaySnapResult(1_000L, 1_000L),
+            OverlaySnapResult(1_000L, 2_000L),
             snapOverlayTimelineStart(1_080L, 1_000L, 10_000L, listOf(2_000L))
         )
     }
@@ -74,5 +74,21 @@ class OverlaySnapTest {
     @Test
     fun negativeTimelineDurationProducesZeroPosition() {
         assertEquals(0L, calculateOverlayDragPosition(5_000L, 100L, -1L))
+    }
+
+    @Test
+    fun negativeProjectDurationIsHandledSafely() {
+        assertEquals(
+            OverlaySnapResult(0L, null),
+            snapOverlayTimelineStart(5_000L, Long.MAX_VALUE, -1L, listOf(0L, 1_000L))
+        )
+    }
+
+    @Test
+    fun snapGuideUsesOnlyRealBoundariesWithinProject() {
+        assertEquals(
+            OverlaySnapResult(0L, null),
+            snapOverlayTimelineStart(0L, 2_000L, 10_000L, listOf(1_000L), 100L)
+        )
     }
 }
