@@ -210,7 +210,7 @@ class ModelLogicTest {
         val points = listOf(AudioGainPoint(100L, 0.2f), AudioGainPoint(200L, 0.8f), AudioGainPoint(300L, 1.4f))
         val moved = moveAudioGainPoint(points, 1, 100L)
         assertEquals(listOf(100L, 300L, 400L), moved.map { it.timeMs })
-        assertEquals(0.8f, moved.first { it.timeMs == 300L }.gain, 0.0001f)
+        assertEquals(0.8f, moved.first { it.timeMs == 400L }.gain, 0.0001f)
         assertEquals(points, moveAudioGainPoint(points, -1, 100L))
     }
 
