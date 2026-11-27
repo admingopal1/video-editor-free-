@@ -621,6 +621,60 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun addOverlayVideo(uri: Uri) {
+        if (clips.isEmpty()) {
+            toast("Add a main video or photo first")
+            return
+        }
+        viewModelScope.launch {
+            val info = withContext(Dispatchers.IO) {
+                val retriever = MediaMetadataRetriever()
+                try {
+                    retriever.setDataSource(ctx, uri)
+                    val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                    var width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+                    var height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+                    val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+                    if (rotation == 90 || rotation == 270) { val swap = width; width = height; height = swap }
+                    Triple(duration, width, height)
+                } catch (_: Exception) {
+                    Triple(0L, 0, 0)
+                } finally {
+                    retriever.release()
+                }
+            }
+            val duration = info.first
+            if (duration <= 0L || info.second <= 0 || info.third <= 0) {
+                toast("Could not read this video")
+                return@launch
+            }
+            val remaining = (timeline.totalMs() - timeMs).coerceAtLeast(1L)
+            val sourceDuration = minOf(duration, remaining)
+            if (sourceDuration < 500L) {
+                toast("Move the playhead earlier to add a longer PIP video")
+                return@launch
+            }
+            record(true)
+            val layer = OverlayClip(
+                id = nextId++,
+                uriString = uri.toString(),
+                name = displayName(uri),
+                durationMs = duration,
+                width = info.second,
+                height = info.third,
+                startMs = 0L,
+                endMs = sourceDuration,
+                timelineStartMs = timeMs,
+                isImage = false,
+                muted = true,
+                scale = 0.32f,
+                layerOrder = overlayClips.size
+            )
+            overlayClips = overlayClips + layer
+            selectedOverlayId = layer.id
+        }
+    }
+
     val overlayBitmaps = mutableStateMapOf<String, Bitmap>()
     var selectedOverlayId by mutableStateOf<Long?>(null)
 
