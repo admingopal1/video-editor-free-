@@ -14,6 +14,19 @@ class ModelLogicTest {
     }
 
     @Test
+    fun duplicatingAudioTrackKeepsSettingsButUsesNewIdentityAndName() {
+        val original = AudioTrack(id = 4L, uri = android.net.Uri.parse("file:///track.wav"), name = "Music", volume = 0.6f, offsetMs = 1200L, muted = true, solo = true)
+        val copy = duplicateAudioTrack(original, 9L)
+        assertEquals(9L, copy.id)
+        assertEquals("Music copy", copy.name)
+        assertEquals(original.uri, copy.uri)
+        assertEquals(original.volume, copy.volume, 0.0001f)
+        assertEquals(original.offsetMs, copy.offsetMs)
+        assertEquals(original.muted, copy.muted)
+        assertEquals(original.solo, copy.solo)
+    }
+
+    @Test
     fun audioTrackReorderMovesOneStepAndRespectsBoundaries() {
         val ids = listOf(10L, 20L, 30L)
         assertEquals(listOf(20L, 10L, 30L), moveAudioTrackId(ids, 10L, 1))

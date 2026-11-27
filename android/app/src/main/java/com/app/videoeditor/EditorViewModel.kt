@@ -784,6 +784,16 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         audioTracks = audioTracks.map { if (it.id == id) f(it) else it }
     }
 
+    fun duplicateAudio(id: Long) {
+        if (audioTracks.size >= 4) { toast("Up to 4 audio tracks"); return }
+        val source = audioTracks.firstOrNull { it.id == id } ?: return
+        record(true)
+        val duplicate = duplicateAudioTrack(source, nextId++)
+        audioTracks = audioTracks + duplicate
+        ensureWaveform(duplicate.uri)
+        toast("Audio track duplicated")
+    }
+
     fun moveAudioTrack(id: Long, direction: Int) {
         val reorderedIds = moveAudioTrackId(audioTracks.map { it.id }, id, direction)
         if (reorderedIds == audioTracks.map { it.id }) return
