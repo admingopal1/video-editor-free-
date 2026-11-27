@@ -14,27 +14,32 @@ fun snapOverlayTimelineStart(
     boundariesMs: List<Long>,
     thresholdMs: Long = 120L
 ): OverlaySnapResult {
-    val maxStart = (totalDurationMs - durationMs.coerceAtLeast(0L)).coerceAtLeast(0L)
+    val total = totalDurationMs.coerceAtLeast(0L)
+    val duration = durationMs.coerceAtLeast(0L)
+    val maxStart = if (duration >= total) 0L else total - duration
     val requested = requestedStartMs.coerceIn(0L, maxStart)
     val threshold = thresholdMs.coerceAtLeast(0L)
     val candidates = boundariesMs.asSequence()
-        .filter { it >= 0L }
+        .filter { it >= 0L && it <= total }
         .flatMap { boundary ->
             sequenceOf(
-                boundary.coerceIn(0L, maxStart),
-                (boundary - durationMs.coerceAtLeast(0L)).coerceIn(0L, maxStart)
+                boundary.coerceIn(0L, maxStart) to boundary,
+                (boundary - duration).coerceIn(0L, maxStart) to boundary
             )
         }
         .distinct()
-        .map { candidate -> candidate to kotlin.math.abs(candidate - requested) }
-        .filter { (_, distance) -> distance <= threshold }
-        .sortedWith(compareBy<Pair<Long, Long>> { it.second }.thenBy { it.first })
+        .map { (candidateStart, boundary) ->
+            Triple(candidateStart, boundary, kotlin.math.abs(candidateStart - requested))
+        }
+        .filter { (_, _, distance) -> distance <= threshold }
+        .sortedWith(compareBy<Triple<Long, Long, Long>> { it.third }.thenBy { it.first }.thenBy { it.second })
         .firstOrNull()
 
     return if (candidates == null) {
         OverlaySnapResult(requested, null)
     } else {
-        OverlaySnapResult(candidates.first, candidates.first)
+        // The guide marks the matched boundary, which can be the overlay's right edge.
+        OverlaySnapResult(candidates.first, candidates.second)
     }
 }
 
