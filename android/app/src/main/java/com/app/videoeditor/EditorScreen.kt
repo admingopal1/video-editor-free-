@@ -206,6 +206,27 @@ fun EditorScreen(vm: EditorViewModel) {
             GradientButton("Export", onClick = { requestExport() }, enabled = vm.clips.isNotEmpty(), shimmer = vm.clips.isNotEmpty())
         }
 
+        if (vm.missingMediaRecoveryPending) {
+            Glass(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), shape = RoundedCornerShape(14.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Missing source media", color = Pal.cyan, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "${vm.missingMediaCount} item(s) unavailable. Original project is preserved; saving the recovered version will omit them.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Pal.textLo
+                        )
+                    }
+                    TextButton(onClick = { vm.saveRecoveredProject() }) {
+                        Text("Save recovered")
+                    }
+                }
+            }
+        }
+
         // ---------- live preview of the whole timeline ----------
         PreviewStage(vm, Modifier.weight(1f), onAdd = { addMedia() })
 
