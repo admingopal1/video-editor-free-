@@ -40,6 +40,7 @@ data class OverlayClip(
 
 fun OverlayClip.isValidOverlayClip(): Boolean =
     id > 0L &&
+        uriString.isNotBlank() &&
         durationMs > 0L &&
         width > 0 && height > 0 &&
         startMs >= 0L && endMs > startMs && endMs <= durationMs &&
