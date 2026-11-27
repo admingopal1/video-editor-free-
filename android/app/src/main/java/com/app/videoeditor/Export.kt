@@ -370,6 +370,9 @@ fun buildAudioProcessors(c: Clip): List<AudioProcessor> {
     if (!c.isImage && c.audioEqGainsDb.any { it != 0f }) l += AudioEqualizerProcessor(c.audioEqGainsDb)
     if (c.speed != 1f && !c.isImage) l += SonicAudioProcessor().apply { setSpeed(c.speed) }
     if (c.volume != 1f && !c.muted) l += volumeProcessor(c.volume)
+    if (c.audioFadeInMs > 0L || c.audioFadeOutMs > 0L) {
+        l += AudioFadeProcessor(c.audioFadeInMs, c.audioFadeOutMs, c.outputMs)
+    }
     return l
 }
 
