@@ -16,9 +16,6 @@ class AudioFadeProcessor(
     private val noiseGatePoints: List<AudioGainPoint> = emptyList()
 ) : BaseAudioProcessor() {
     private var frameIndex = 0L
-    private var durationFrames = 0L
-    private var fadeInFrames = 0L
-    private var fadeOutFrames = 0L
     private val gainCursor = AudioGainEnvelopeCursor(gainPoints)
     private val duckCursor = AudioGainEnvelopeCursor(duckingPoints)
     private val gateCursor = AudioGainEnvelopeCursor(noiseGatePoints)
@@ -28,9 +25,6 @@ class AudioFadeProcessor(
         if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT &&
             inputAudioFormat.encoding != C.ENCODING_PCM_FLOAT
         ) return AudioProcessor.AudioFormat.NOT_SET
-        durationFrames = (durationMs.coerceAtLeast(0L) * inputAudioFormat.sampleRate) / 1000L
-        fadeInFrames = (fadeInMs.coerceAtLeast(0L) * inputAudioFormat.sampleRate) / 1000L
-        fadeOutFrames = (fadeOutMs.coerceAtLeast(0L) * inputAudioFormat.sampleRate) / 1000L
         return inputAudioFormat
     }
 
@@ -40,17 +34,13 @@ class AudioFadeProcessor(
         val channels = inputAudioFormat.channelCount.coerceAtLeast(1)
         val isFloat = inputAudioFormat.encoding == C.ENCODING_PCM_FLOAT
         while (inputBuffer.remaining() >= inputAudioFormat.bytesPerFrame) {
-            val fadeInGain = if (fadeInFrames > 0L) {
-                (frameIndex.toFloat() / fadeInFrames).coerceIn(0f, 1f)
-            } else 1f
-            val fadeOutGain = if (fadeOutFrames > 0L && durationFrames > 0L) {
-                ((durationFrames - frameIndex).toFloat() / fadeOutFrames).coerceIn(0f, 1f)
-            } else 1f
             val elapsedMs = (frameIndex * 1000L) / inputAudioFormat.sampleRate.coerceAtLeast(1)
+            // Use the same overlap-safe envelope as preview so exported fades match playback.
+            val fadeGain = audioFadeGainAt(elapsedMs, durationMs, fadeInMs, fadeOutMs)
             val keyframeGain = gainCursor.gainAt(elapsedMs)
             val duckGain = duckCursor.gainAt(elapsedMs)
             val gateGain = gateCursor.gainAt(elapsedMs)
-            val gain = minOf(fadeInGain, fadeOutGain) * keyframeGain * duckGain * gateGain
+            val gain = fadeGain * keyframeGain * duckGain * gateGain
             repeat(channels) {
                 if (isFloat) {
                     output.putFloat(clampPcmFloatSample(inputBuffer.float * gain))
