@@ -106,4 +106,17 @@ class ModelLogicTest {
         assertEquals(1f, audioFadeGainAt(500L, 1_000L, 0L, 0L), 0.0001f)
     }
 
+    @Test
+    fun audioGainKeyframesInterpolateAndClamp() {
+        val points = listOf(AudioGainPoint(0L, 0f), AudioGainPoint(1_000L, 2f))
+        assertEquals(0f, audioKeyframeGainAt(points, 0L), 0.0001f)
+        assertEquals(1f, audioKeyframeGainAt(points, 500L), 0.0001f)
+        assertEquals(2f, audioKeyframeGainAt(points, 1_500L), 0.0001f)
+    }
+
+    @Test
+    fun emptyAudioGainKeyframesKeepUnityGain() {
+        assertEquals(1f, audioKeyframeGainAt(emptyList(), 500L), 0.0001f)
+    }
+
 }
