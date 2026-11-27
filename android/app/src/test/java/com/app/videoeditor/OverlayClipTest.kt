@@ -68,6 +68,34 @@ class OverlayClipTest {
     }
 
     @Test
+    fun layerReorderingMovesOnlyOneStepAndKeepsUniqueStableOrder() {
+        val back = sample().copy(id = 1L, layerOrder = 0)
+        val middle = sample().copy(id = 2L, layerOrder = 1)
+        val front = sample().copy(id = 3L, layerOrder = 2)
+        val original = listOf(back, middle, front)
+
+        val movedForward = reorderOverlayLayer(original, 1L, 1)
+        assertEquals(listOf(2L, 1L, 3L), movedForward.map { it.id })
+        assertEquals(listOf(0, 1, 2), movedForward.map { it.layerOrder })
+
+        val movedBackward = reorderOverlayLayer(movedForward, 1L, -1)
+        assertEquals(original.map { it.id }, movedBackward.map { it.id })
+        assertEquals(original, movedBackward)
+    }
+
+    @Test
+    fun layerReorderingAtBoundariesIsANoOpAndUnknownIdsAreIgnored() {
+        val first = sample().copy(id = 1L, layerOrder = 0)
+        val second = sample().copy(id = 2L, layerOrder = 1)
+        val layers = listOf(first, second)
+
+        assertEquals(layers, reorderOverlayLayer(layers, 1L, -1))
+        assertEquals(layers, reorderOverlayLayer(layers, 2L, 1))
+        assertEquals(layers, reorderOverlayLayer(layers, 99L, 1))
+        assertEquals(layers, reorderOverlayLayer(layers, 1L, 0))
+    }
+
+    @Test
     fun invalidOverlayGeometryOrTimingIsRejected() {
         val invalid = sample().copy(endMs = 13_000L)
 
