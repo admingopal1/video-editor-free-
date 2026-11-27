@@ -101,6 +101,15 @@ class AudioEqualizerProcessor(
         val BAND_FREQUENCIES_HZ = listOf(60f, 230f, 910f, 3600f, 14000f)
         const val BAND_Q = 1.0f
 
+        /** Additive quick-start curves; users can fine-tune every band afterwards. */
+        fun presetGains(name: String): List<Float> = when (name.lowercase()) {
+            "bass boost" -> listOf(5f, 3f, 0f, 0f, 1f)
+            "vocal" -> listOf(-2f, 1f, 4f, 3f, -1f)
+            "podcast" -> listOf(-1f, 2f, 4f, 2f, -2f)
+            "treble" -> listOf(0f, -1f, 0f, 3f, 5f)
+            else -> List(BAND_COUNT) { 0f }
+        }
+
         fun normalizeGains(gains: List<Float>): List<Float> =
             List(BAND_COUNT) { index ->
                 (gains.getOrNull(index) ?: 0f).let { if (it.isFinite()) it.coerceIn(-12f, 12f) else 0f }
