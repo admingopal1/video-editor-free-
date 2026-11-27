@@ -1,6 +1,6 @@
 # PIP Video Export — Engineering Plan
 
-Status: investigation complete; implementation intentionally guarded.
+Status: investigation in progress; implementation intentionally guarded.
 
 ## Current behavior
 
@@ -9,23 +9,30 @@ Status: investigation complete; implementation intentionally guarded.
 - Export preflight currently rejects projects containing PIP video. Keep this guard until every acceptance check below passes.
 - PIP-video audio is muted by default in the editor. Unmuted audio must not be silently discarded.
 
-## Verified Media3 1.4.1 constraints
+## Verified Media3 compositor behavior
 
-The app currently uses Media3 1.4.1. The official Media3 compositor guide demonstrates that the first sequence (input 0) can be positioned as the overlay and the second sequence as the background. Therefore the earlier assumption that the first registered input is necessarily drawn over later inputs is not supported; do not rely on that claim.
+The official Media3 compositor guide demonstrates that input 0 is positioned as the foreground PIP overlay and the second input is presented in the background. The app's pure composition-plan helper must therefore assign PIP inputs before the primary timeline input; reserving input 0 for the primary timeline would contradict the documented example.
+
+Current plan convention:
+- PIP video inputs receive IDs starting at 0, ordered from highest `layerOrder` (frontmost) to lowest.
+- The primary timeline is assigned the final input ID after the PIP inputs.
+- This is deterministic input planning only. It does not yet prove that multiple overlapping PIP inputs composite in the exact editor z-order on every supported device.
 
 Verified API facts:
 
 1. `VideoCompositorSettings` exposes output-size selection and per-input `OverlaySettings`, including position, scale, rotation, and alpha.
-2. The official guide's example uses input 0 as the foreground PIP and the other input as the background. This demonstrates controllable per-input geometry, but does not itself establish how to select a primary timeline clock when inputs have different start times and durations.
+2. The official guide's moving-PIP example explicitly treats input 0 as the overlay and later input as the background.
 3. The composition API accepts multiple `EditedMediaItemSequence` instances and custom `VideoCompositorSettings`.
-4. The app's Media3 1.4.1 `EditedMediaItemSequence` API has no video-gap insertion method. A PIP sequence that starts later than the main timeline therefore needs a verified way to represent its inactive interval without rendering a black/transparent frame over the main image.
-5. `VideoCompositorSettings` controls input layout; it does not by itself create missing frames, align independent source clocks to the editor's project clock, or mix independently offset audio.
-6. Do not assume a dependency upgrade alone solves these timeline and audio requirements. Verify the exact API/version and output behavior with a short instrumented export before removing the preflight guard.
+4. The current public API reference documents `EditedMediaItemSequence.Builder.addGap(durationUs)` as a period with no media. The reference page is not version-pinned, so the exact availability and runtime behavior in the app's pinned Media3 1.5.1 must be verified against that artifact before relying on it.
+5. A gap in a video sequence must be tested for compositor behavior: it must leave the primary frame visible rather than render an opaque black frame over it.
+6. `VideoCompositorSettings` controls input layout; it does not by itself align independent source clocks, mix independently offset audio, or prove behavior for multiple overlapping PIP streams.
+7. Do not assume a dependency upgrade or a pure timeline plan alone solves these requirements. Verify the exact API/version and output behavior with a short instrumented export before removing the preflight guard.
 
 Official references:
 - https://developer.android.com/media/media3/transformer/videocompositorsettings
 - https://developer.android.com/reference/androidx/media3/common/VideoCompositorSettings
 - https://developer.android.com/reference/androidx/media3/transformer/Composition.Builder
+- https://developer.android.com/reference/androidx/media3/transformer/EditedMediaItemSequence.Builder
 - https://developer.android.com/reference/androidx/media3/effect/VideoCompositor
 
 ## Required export architecture
