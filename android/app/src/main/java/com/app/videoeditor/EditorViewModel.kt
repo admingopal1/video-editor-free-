@@ -321,8 +321,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private val projectSaveMutex = Mutex()
 
     /** Reconnects one unavailable source while preserving its saved edit metadata. */
-    fun relinkMissingMedia(itemId: Long, uri: Uri) {
-        val item = missingMediaItems.firstOrNull { it.id == itemId } ?: return
+    fun relinkMissingMedia(itemKind: String, itemId: Long, uri: Uri) {
+        val item = missingMediaItems.firstOrNull { it.kind == itemKind && it.id == itemId } ?: return
         viewModelScope.launch {
             try {
                 val mime = ctx.contentResolver.getType(uri).orEmpty()
