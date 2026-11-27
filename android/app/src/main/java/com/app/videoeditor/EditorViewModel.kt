@@ -326,14 +326,14 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val mime = ctx.contentResolver.getType(uri).orEmpty()
-                val validType = when (item.kind) {
+                val validType = mime.isBlank() || when (item.kind) {
                     "audio" -> mime.startsWith("audio/")
-                    "clip" -> if (mime.startsWith("image/")) true else mime.startsWith("video/")
-                    "overlay" -> true
+                    "clip" -> mime.startsWith("image/") || mime.startsWith("video/")
+                    "overlay" -> mime.startsWith("image/") || mime.startsWith("video/")
                     else -> false
                 }
                 if (!validType || !canOpen(uri)) {
-                    toast("Choose a readable \${item.kind} file of the same media type.")
+                    toast("Choose a readable " + item.kind + " file of the same media type.")
                     return@launch
                 }
                 val source = recoverySourceJson ?: return@launch
@@ -366,7 +366,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 recoverySourceJson = updatedSource.takeIf { loaded.dropped > 0 }
                 applyLoaded(projectId, loaded)
-                toast(if (loaded.dropped == 0) "All available media reconnected. You can save the project now." else "Media reconnected. \${loaded.missing.size} source(s) still need relinking.")
+                toast(if (loaded.dropped == 0) "All available media reconnected. You can save the project now." else "Media reconnected. " + loaded.missing.size + " source(s) still need relinking.")
             } catch (e: Exception) {
                 toast(e.message ?: "Could not relink this media. Original backup is preserved.")
             }
