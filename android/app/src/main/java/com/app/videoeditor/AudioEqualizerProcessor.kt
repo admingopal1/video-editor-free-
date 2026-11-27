@@ -44,10 +44,9 @@ class AudioEqualizerProcessor(
         if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT &&
             inputAudioFormat.encoding != C.ENCODING_PCM_FLOAT
         ) return AudioProcessor.AudioFormat.NOT_SET
-        if (requestedGainsDb.all { it == 0f }) return AudioProcessor.AudioFormat.NOT_SET
-        filtersByChannel = Array(inputAudioFormat.channelCount.coerceAtLeast(1)) {
-            createFilters(inputAudioFormat.sampleRate, requestedGainsDb)
-        }
+        configuredSampleRate = inputAudioFormat.sampleRate
+        configuredChannelCount = inputAudioFormat.channelCount.coerceAtLeast(1)
+        rebuildFilters()
         return inputAudioFormat
     }
 
