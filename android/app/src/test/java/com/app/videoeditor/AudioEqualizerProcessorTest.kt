@@ -47,4 +47,14 @@ class AudioEqualizerProcessorTest {
             assertTrue(filter.process(sample).isFinite())
         }
     }
+
+    @Test
+    fun presetsHaveFiveBoundedBandsAndFlatResetsAllBands() {
+        listOf("Bass Boost", "Vocal", "Podcast", "Treble").forEach { preset ->
+            val gains = AudioEqualizerProcessor.presetGains(preset)
+            assertEquals(AudioEqualizerProcessor.BAND_COUNT, gains.size)
+            assertTrue(gains.all { it in -12f..12f })
+        }
+        assertEquals(List(5) { 0f }, AudioEqualizerProcessor.presetGains("Flat"))
+    }
 }
