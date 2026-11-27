@@ -891,6 +891,28 @@ private fun ToolPanel(
                 Switch(checked = c.muted, onCheckedChange = { m -> vm.update(id) { it.copy(muted = m) } })
             }
             Slide("Volume", c.volume, 0f..2f, "${(c.volume * 100).toInt()}%") { v -> vm.update(id) { it.copy(volume = v) } }
+            Text("Original clip audio EQ", fontWeight = FontWeight.SemiBold)
+            Text("Adjusts sound embedded in this video clip; independent of music tracks.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                listOf("Flat", "Bass Boost", "Vocal").forEach { preset ->
+                    TextButton(onClick = { vm.update(id) { it.copy(audioEqGainsDb = AudioEqualizerProcessor.presetGains(preset)) } }) { Text(preset) }
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                listOf("Podcast", "Treble").forEach { preset ->
+                    TextButton(onClick = { vm.update(id) { it.copy(audioEqGainsDb = AudioEqualizerProcessor.presetGains(preset)) } }) { Text(preset) }
+                }
+            }
+            listOf("60 Hz · Bass", "230 Hz · Low mids", "910 Hz · Midrange", "3.6 kHz · Presence", "14 kHz · Treble").forEachIndexed { band, label ->
+                val gain = c.audioEqGainsDb.getOrNull(band) ?: 0f
+                Slide(label, gain, -12f..12f, String.format(Locale.US, "%+.1f dB", gain)) { value ->
+                    vm.update(id) { clip ->
+                        val gains = AudioEqualizerProcessor.normalizeGains(clip.audioEqGainsDb).toMutableList()
+                        gains[band] = value.coerceIn(-12f, 12f)
+                        clip.copy(audioEqGainsDb = gains)
+                    }
+                }
+            }
         }
         Tool.Animate -> {
             Text("Motion for this clip (great for photos). Shows in the exported video.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
