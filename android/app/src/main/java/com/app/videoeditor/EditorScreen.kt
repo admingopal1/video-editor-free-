@@ -1415,6 +1415,9 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("♪ ${t.name}", Modifier.weight(1f), maxLines = 1)
+                val audioIndex = vm.audioTracks.indexOfFirst { it.id == t.id }
+                TextButton(onClick = { vm.moveAudioTrack(t.id, -1) }, enabled = audioIndex > 0) { Text("↑") }
+                TextButton(onClick = { vm.moveAudioTrack(t.id, 1) }, enabled = audioIndex in 0 until vm.audioTracks.lastIndex) { Text("↓") }
                 TextButton(onClick = { vm.removeAudio(t.id) }) { Text("Remove") }
             }
             Slide("Volume", t.volume, 0f..2f, "${(t.volume * 100).toInt()}%") { v -> vm.updateAudio(t.id) { it.copy(volume = v) } }

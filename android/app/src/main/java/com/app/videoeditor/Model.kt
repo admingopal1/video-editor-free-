@@ -33,6 +33,18 @@ data class AudioGainPoint(val timeMs: Long, val gain: Float)
 fun isAudioTrackAudible(muted: Boolean, solo: Boolean, anyUnmutedSolo: Boolean): Boolean =
     !muted && (!anyUnmutedSolo || solo)
 
+/** Moves a track ID one position in the visible audio-track order; boundaries are no-ops. */
+fun moveAudioTrackId(ids: List<Long>, id: Long, direction: Int): List<Long> {
+    if (direction != -1 && direction != 1) return ids
+    val from = ids.indexOf(id)
+    val to = from + direction
+    if (from < 0 || to !in ids.indices) return ids
+    return ids.toMutableList().also { list ->
+        val item = list.removeAt(from)
+        list.add(to, item)
+    }
+}
+
 data class AudioTrack(
     val id: Long,
     val uri: Uri,

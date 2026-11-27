@@ -784,6 +784,14 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         audioTracks = audioTracks.map { if (it.id == id) f(it) else it }
     }
 
+    fun moveAudioTrack(id: Long, direction: Int) {
+        val reorderedIds = moveAudioTrackId(audioTracks.map { it.id }, id, direction)
+        if (reorderedIds == audioTracks.map { it.id }) return
+        record()
+        val byId = audioTracks.associateBy { it.id }
+        audioTracks = reorderedIds.mapNotNull { byId[it] }
+    }
+
     fun removeAudio(id: Long) {
         if (audioTracks.none { it.id == id }) return
         record(true)

@@ -14,6 +14,17 @@ class ModelLogicTest {
     }
 
     @Test
+    fun audioTrackReorderMovesOneStepAndRespectsBoundaries() {
+        val ids = listOf(10L, 20L, 30L)
+        assertEquals(listOf(20L, 10L, 30L), moveAudioTrackId(ids, 10L, 1))
+        assertEquals(listOf(10L, 30L, 20L), moveAudioTrackId(ids, 30L, -1))
+        assertEquals(ids, moveAudioTrackId(ids, 10L, -1))
+        assertEquals(ids, moveAudioTrackId(ids, 30L, 1))
+        assertEquals(ids, moveAudioTrackId(ids, 99L, 1))
+        assertEquals(ids, moveAudioTrackId(ids, 20L, 0))
+    }
+
+    @Test
     fun voiceGateRespectsTrimStartAndEnd() {
         val wave = floatArrayOf(0f, 0f, 0.9f, 0.9f, 0f, 0f)
         val points = buildTrimmedVoiceGatePoints(wave, 200L, 400L, 0.1f)
