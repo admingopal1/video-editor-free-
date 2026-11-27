@@ -49,23 +49,35 @@ class OverlayClipTest {
 
     @Test
     fun projectAudioValidationRejectsCorruptTrackMetadata() {
-        val valid = AudioTrack(
-            id = 10L,
-            uri = android.net.Uri.parse("content://media/audio/10"),
-            name = "Music"
+        fun valid(
+            id: Long = 10L,
+            uri: String = "content://media/audio/10",
+            name: String = "Music",
+            volume: Float = 1f,
+            offsetMs: Long = 0L,
+            trimStartMs: Long = 0L,
+            trimEndMs: Long = Long.MAX_VALUE,
+            fadeInMs: Long = 0L,
+            noiseGateThreshold: Float = 0.04f,
+            gainPoints: List<AudioGainPoint> = emptyList(),
+            eqGainsDb: List<Float> = List(AudioEqualizerProcessor.BAND_COUNT) { 0f }
+        ) = isValidProjectAudioTrackMetadata(
+            id, uri, name, volume, offsetMs, trimStartMs, trimEndMs,
+            fadeInMs, 0L, noiseGateThreshold, gainPoints, eqGainsDb
         )
-        assertTrue(valid.isValidProjectAudioTrack())
-        assertFalse(valid.copy(id = 0L).isValidProjectAudioTrack())
-        assertFalse(valid.copy(name = " ").isValidProjectAudioTrack())
-        assertFalse(valid.copy(volume = Float.NaN).isValidProjectAudioTrack())
-        assertFalse(valid.copy(volume = 2.1f).isValidProjectAudioTrack())
-        assertFalse(valid.copy(offsetMs = -1L).isValidProjectAudioTrack())
-        assertFalse(valid.copy(trimStartMs = 500L, trimEndMs = 500L).isValidProjectAudioTrack())
-        assertFalse(valid.copy(fadeInMs = -1L).isValidProjectAudioTrack())
-        assertFalse(valid.copy(noiseGateThreshold = Float.POSITIVE_INFINITY).isValidProjectAudioTrack())
-        assertFalse(valid.copy(gainPoints = listOf(AudioGainPoint(-1L, 1f))).isValidProjectAudioTrack())
-        assertFalse(valid.copy(gainPoints = listOf(AudioGainPoint(100L, Float.NaN))).isValidProjectAudioTrack())
-        assertFalse(valid.copy(eqGainsDb = listOf(Float.NaN)).isValidProjectAudioTrack())
+
+        assertTrue(valid())
+        assertFalse(valid(id = 0L))
+        assertFalse(valid(name = " "))
+        assertFalse(valid(volume = Float.NaN))
+        assertFalse(valid(volume = 2.1f))
+        assertFalse(valid(offsetMs = -1L))
+        assertFalse(valid(trimStartMs = 500L, trimEndMs = 500L))
+        assertFalse(valid(fadeInMs = -1L))
+        assertFalse(valid(noiseGateThreshold = Float.POSITIVE_INFINITY))
+        assertFalse(valid(gainPoints = listOf(AudioGainPoint(-1L, 1f))))
+        assertFalse(valid(gainPoints = listOf(AudioGainPoint(100L, Float.NaN))))
+        assertFalse(valid(eqGainsDb = listOf(Float.NaN)))
     }
 
     @Test
