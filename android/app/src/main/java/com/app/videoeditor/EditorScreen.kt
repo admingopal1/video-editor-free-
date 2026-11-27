@@ -138,6 +138,15 @@ fun EditorScreen(vm: EditorViewModel) {
         if (clip == null && tool != null && tool != Tool.Audio && tool != Tool.Canvas) tool = null
     }
 
+    var pendingRelinkId by remember { mutableStateOf<Long?>(null) }
+    val pickRelink = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val targetId = pendingRelinkId
+        pendingRelinkId = null
+        if (uri != null && targetId != null) {
+            runCatching { ctx.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            vm.relinkMissingMedia(targetId, uri)
+        }
+    }
     val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris ->
         uris.forEach { u -> runCatching { ctx.contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION) } }
         vm.addUris(uris)
@@ -219,6 +228,29 @@ fun EditorScreen(vm: EditorViewModel) {
                             style = MaterialTheme.typography.bodySmall,
                             color = Pal.textLo
                         )
+                        vm.missingMediaItems.forEach { item ->
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "${item.kind.uppercase(Locale.US)} · ${item.name}",
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Pal.textHi,
+                                    maxLines = 1
+                                )
+                                TextButton(onClick = {
+                                    pendingRelinkId = item.id
+                                    val types = when (item.kind) {
+                                        "audio" -> arrayOf("audio/*")
+                                        "clip", "overlay" -> arrayOf("video/*", "image/*")
+                                        else -> arrayOf("*/*")
+                                    }
+                                    pickRelink.launch(types)
+                                }) { Text("Relink") }
+                            }
+                        }
                     }
                     TextButton(onClick = { vm.saveRecoveredProject() }) {
                         Text("Save recovered")
