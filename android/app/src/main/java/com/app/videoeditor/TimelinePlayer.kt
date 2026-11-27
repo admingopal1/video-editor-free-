@@ -384,7 +384,7 @@ class TimelinePlayer(
                     }
                 )
             } else {
-                if (force || abs(p.currentPosition - wanted) > 400L) p.seekTo(wanted.coerceAtLeast(0L))
+                if (shouldResyncAudioPlayer(p.currentPosition, wanted, force)) p.seekTo(wanted.coerceAtLeast(0L))
                 p.play()
             }
         }
