@@ -57,13 +57,15 @@ class AudioEqualizerProcessor(
         while (inputBuffer.remaining() >= format.bytesPerFrame) {
             repeat(channels) { channel ->
                 val chain = filters.getOrNull(channel)
-                if (isFloat) {
+                if (chain == null) {
+                    if (isFloat) output.putFloat(inputBuffer.float) else output.putShort(inputBuffer.short)
+                } else if (isFloat) {
                     var sample = inputBuffer.float
-                    if (chain != null) chain.forEach { sample = it.process(sample) }
+                    chain.forEach { sample = it.process(sample) }
                     output.putFloat(clampPcmFloatSample(sample))
                 } else {
                     var sample = inputBuffer.short.toFloat() / Short.MAX_VALUE.toFloat()
-                    if (chain != null) chain.forEach { sample = it.process(sample) }
+                    chain.forEach { sample = it.process(sample) }
                     output.putShort((clampPcmFloatSample(sample) * Short.MAX_VALUE)
                         .roundToInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort())
                 }
