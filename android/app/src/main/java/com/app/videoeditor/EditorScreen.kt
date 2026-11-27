@@ -590,7 +590,8 @@ private fun Timeline(
                     val wave = vm.waves[t.uri.toString()]
                     val x = minOf(t.offsetMs / 1000f * dpPerSec, maxOf(totalDp - 40f, 0f))
                     val left = maxOf(totalDp - x, 40f)
-                    val len = if (wave != null && wave.isNotEmpty()) (wave.size * 0.1f - t.trimStartMs / 1000f) * dpPerSec else left
+                    val sourceEndSec = if (t.trimEndMs == Long.MAX_VALUE) (wave?.size ?: 0) * 0.1f else t.trimEndMs / 1000f
+                    val len = if (wave != null && wave.isNotEmpty()) (sourceEndSec - t.trimStartMs / 1000f).coerceAtLeast(0.1f) * dpPerSec else left
                     val w = maxOf(if (t.loop && t.offsetMs == 0L) left else minOf(len, left), 40f)
                     Box(
                         Modifier.padding(top = 4.dp).offset(x = x.dp).width(w.dp).height(26.dp).clip(RoundedCornerShape(8.dp))
