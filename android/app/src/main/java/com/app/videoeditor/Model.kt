@@ -315,7 +315,7 @@ sealed class ExportState {
 fun Clip.toJson(): JSONObject = JSONObject().apply {
     put("id", id); put("uri", uri.toString()); put("dur", durationMs); put("w", width); put("h", height)
     put("start", startMs); put("end", endMs); put("img", isImage)
-    put("speed", speed.toDouble()); put("vol", volume.toDouble()); put("muted", muted); put("solo", solo); put("solo", solo)
+    put("speed", speed.toDouble()); put("vol", volume.toDouble()); put("muted", muted)
     put("rot", rotation); put("fh", flipH); put("fv", flipV); put("zoom", zoom.toDouble())
     put("cl", cropL.toDouble()); put("cr", cropR.toDouble()); put("ct", cropT.toDouble()); put("cb", cropB.toDouble())
     put("br", brightness.toDouble()); put("co", contrast.toDouble()); put("sa", saturation.toDouble())
@@ -392,7 +392,7 @@ fun clipFromJson(o: JSONObject): Clip {
 
 fun AudioTrack.toJson(): JSONObject = JSONObject().apply {
     put("id", id); put("uri", uri.toString()); put("name", name); put("vol", volume.toDouble())
-    put("off", offsetMs); put("trim", trimStartMs); put("trimEnd", trimEndMs); put("loop", loop); put("fadeIn", fadeInMs); put("fadeOut", fadeOutMs); put("gainPoints", JSONArray().apply { gainPoints.forEach { put(JSONObject().put("time", it.timeMs).put("gain", it.gain.toDouble())) } }); put("voiceover", isVoiceover); put("autoDuck", autoDuck); put("noiseGate", noiseGateEnabled); put("noiseGateThreshold", noiseGateThreshold.toDouble()); put("muted", muted)
+    put("off", offsetMs); put("trim", trimStartMs); put("trimEnd", trimEndMs); put("loop", loop); put("fadeIn", fadeInMs); put("fadeOut", fadeOutMs); put("gainPoints", JSONArray().apply { gainPoints.forEach { put(JSONObject().put("time", it.timeMs).put("gain", it.gain.toDouble())) } }); put("voiceover", isVoiceover); put("autoDuck", autoDuck); put("noiseGate", noiseGateEnabled); put("noiseGateThreshold", noiseGateThreshold.toDouble()); put("muted", muted); put("solo", solo)
 }
 
 fun audioFromJson(o: JSONObject): AudioTrack = AudioTrack(
