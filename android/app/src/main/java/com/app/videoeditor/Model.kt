@@ -127,10 +127,19 @@ fun normalizedAudioTrimEndMs(trimEndMs: Long?, trimStartMs: Long): Long =
 fun audioFadeGainAt(elapsedMs: Long, durationMs: Long, fadeInMs: Long, fadeOutMs: Long): Float {
     if (durationMs <= 0L) return 0f
     val position = elapsedMs.coerceIn(0L, durationMs)
-    val fadeInGain = if (fadeInMs > 0L) (position.toFloat() / fadeInMs).coerceIn(0f, 1f) else 1f
-    val remaining = durationMs - position
-    val fadeOutGain = if (fadeOutMs > 0L) (remaining.toFloat() / fadeOutMs).coerceIn(0f, 1f) else 1f
-    return minOf(fadeInGain, fadeOutGain)
+    val requestedIn = fadeInMs.coerceAtLeast(0L)
+    val requestedOut = fadeOutMs.coerceAtLeast(0L)
+    // If both fades overlap, shorten them proportionally so they meet cleanly.
+    val requestedTotal = requestedIn.toDouble() + requestedOut.toDouble()
+    val scale = if (requestedTotal > durationMs.toDouble() && requestedTotal > 0.0) {
+        durationMs.toDouble() / requestedTotal
+    } else 1.0
+    val effectiveIn = requestedIn.toDouble() * scale
+    val effectiveOut = requestedOut.toDouble() * scale
+    val fadeInGain = if (effectiveIn > 0.0) (position.toDouble() / effectiveIn).coerceIn(0.0, 1.0) else 1.0
+    val remaining = (durationMs - position).toDouble()
+    val fadeOutGain = if (effectiveOut > 0.0) (remaining / effectiveOut).coerceIn(0.0, 1.0) else 1.0
+    return minOf(fadeInGain, fadeOutGain).toFloat()
 }
 
 /** Points must be sorted by time; project loading and editing normalize this once. */
