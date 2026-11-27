@@ -115,8 +115,6 @@ fun EditorScreen(vm: EditorViewModel) {
     var tool by remember { mutableStateOf<Tool?>(null) }
     var dpPerSec by remember { mutableFloatStateOf(40f) }
     var showProjects by remember { mutableStateOf(false) }
-    var audioRenameId by remember { mutableStateOf<Long?>(null) }
-    var audioRenameValue by remember { mutableStateOf("") }
     var kfSel by remember { mutableIntStateOf(0) }
     val clip = vm.selected
     val pos = vm.playheadLocalMediaMs()      // time inside the clip under the playhead (media ms)
@@ -383,16 +381,6 @@ fun EditorScreen(vm: EditorViewModel) {
             dismissButton = { TextButton(onClick = { vm.dismissExport() }) { Text("Close") } }
         )
     }
-    val renamingAudio = vm.audioTracks.firstOrNull { it.id == audioRenameId }
-    if (renamingAudio != null) {
-        AlertDialog(
-            onDismissRequest = { audioRenameId = null },
-            title = { Text("Rename audio track") },
-            text = { OutlinedTextField(value = audioRenameValue, onValueChange = { audioRenameValue = it }, singleLine = true, label = { Text("Track name") }) },
-            confirmButton = { TextButton(onClick = { vm.renameAudio(renamingAudio.id, audioRenameValue); audioRenameId = null }) { Text("Save") } },
-            dismissButton = { TextButton(onClick = { audioRenameId = null }) { Text("Cancel") } }
-        )
-    }
 }
 
 // =====================================================================
@@ -598,7 +586,17 @@ private fun Timeline(
                     }
                 }
                 // audio tracks (waveform lanes)
-                vm.audioTracks.forEach { t ->
+                val renamingAudio = vm.audioTracks.firstOrNull { it.id == audioRenameId }
+    if (renamingAudio != null) {
+        AlertDialog(
+            onDismissRequest = { audioRenameId = null },
+            title = { Text("Rename audio track") },
+            text = { OutlinedTextField(value = audioRenameValue, onValueChange = { audioRenameValue = it }, singleLine = true, label = { Text("Track name") }) },
+            confirmButton = { TextButton(onClick = { vm.renameAudio(renamingAudio.id, audioRenameValue); audioRenameId = null }) { Text("Save") } },
+            dismissButton = { TextButton(onClick = { audioRenameId = null }) { Text("Cancel") } }
+        )
+    }
+    vm.audioTracks.forEach { t ->
                     val wave = vm.waves[t.uri.toString()]
                     val x = minOf(t.offsetMs / 1000f * dpPerSec, maxOf(totalDp - 40f, 0f))
                     val left = maxOf(totalDp - x, 40f)
@@ -1408,6 +1406,8 @@ private fun KeyframePanel(vm: EditorViewModel, c: Clip, pos: Long, sel: Int, onS
 
 @Composable
 private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () -> Unit) {
+    var audioRenameId by remember { mutableStateOf<Long?>(null) }
+    var audioRenameValue by remember { mutableStateOf("") }
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         Button(onClick = pickAudio) { Text("＋ Music / sound") }
         Button(
