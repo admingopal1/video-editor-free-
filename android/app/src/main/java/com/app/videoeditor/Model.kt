@@ -15,6 +15,8 @@ enum class Anim(val label: String) {
 
 enum class Ease(val label: String) { Linear("Linear"), Smooth("Smooth") }
 
+enum class ClipMaskShape { None, Rectangle, Ellipse }
+
 /** A transform keyframe. t is 0..1 of the clip's (output) duration. x,y in -1..1 frame units. */
 data class Keyframe(
     val t: Float,
@@ -444,6 +446,13 @@ fun isValidProjectClipMetadata(
         isValidRgbCurves(rgbCurves) &&
         isValidLutIntensity(lutIntensity)
 
+fun isValidClipMask(shape: ClipMaskShape, centerX: Float, centerY: Float, width: Float, height: Float, feather: Float): Boolean =
+    centerX.isFinite() && centerX in 0f..1f &&
+    centerY.isFinite() && centerY in 0f..1f &&
+    width.isFinite() && width in 0.05f..1.5f &&
+    height.isFinite() && height in 0.05f..1.5f &&
+    feather.isFinite() && feather in 0f..0.25f
+
 fun Clip.isValidProjectClip(): Boolean = isValidProjectClipMetadata(
     id, uri.toString(), durationMs, width, height, startMs, endMs, speed, volume, zoom,
     listOf(cropL, cropR, cropT, cropB, brightness, contrast, saturation, warmth, hue),
@@ -452,7 +461,7 @@ fun Clip.isValidProjectClip(): Boolean = isValidProjectClipMetadata(
     listOf(hslRed, hslOrange, hslYellow, hslGreen, hslAqua, hslBlue, hslPurple, hslMagenta),
     listOf(redCurveShadows, redCurveMidtones, redCurveHighlights, greenCurveShadows, greenCurveMidtones, greenCurveHighlights, blueCurveShadows, blueCurveMidtones, blueCurveHighlights),
     lutIntensity
-)
+) && isValidClipMask(maskShape, maskCenterX, maskCenterY, maskWidth, maskHeight, maskFeather)
 
 data class Clip(
     val id: Long,
@@ -519,6 +528,14 @@ data class Clip(
     val lutUri: String? = null,
     /** Blend between original image and imported LUT output; 0 disables the look, 1 is full strength. */
     val lutIntensity: Float = 1f,
+    /** Non-destructive clip mask; defaults preserve legacy projects. */
+    val maskShape: ClipMaskShape = ClipMaskShape.None,
+    val maskCenterX: Float = 0.5f,
+    val maskCenterY: Float = 0.5f,
+    val maskWidth: Float = 0.8f,
+    val maskHeight: Float = 0.8f,
+    val maskFeather: Float = 0.02f,
+    val maskInvert: Boolean = false,
     val filter: Filter = Filter.None,
     val anim: Anim = Anim.None,
     val fadeInMs: Long = 0L,
@@ -561,6 +578,8 @@ fun Clip.toJson(): JSONObject = JSONObject().apply {
     put("bcs", blueCurveShadows.toDouble()); put("bcm", blueCurveMidtones.toDouble()); put("bch", blueCurveHighlights.toDouble())
     put("lutUri", lutUri ?: JSONObject.NULL)
     put("lutIntensity", lutIntensity.toDouble())
+    put("maskShape", maskShape.name); put("maskX", maskCenterX.toDouble()); put("maskY", maskCenterY.toDouble())
+    put("maskW", maskWidth.toDouble()); put("maskH", maskHeight.toDouble()); put("maskFeather", maskFeather.toDouble()); put("maskInvert", maskInvert)
     put("filter", filter.name); put("anim", anim.name); put("fin", fadeInMs); put("fout", fadeOutMs)
     put("audioEq", JSONArray().apply { audioEqGainsDb.forEach { put(it.toDouble()) } })
     put("audioFadeIn", audioFadeInMs.coerceAtLeast(0L)); put("audioFadeOut", audioFadeOutMs.coerceAtLeast(0L))
@@ -658,6 +677,10 @@ fun clipFromJson(o: JSONObject): Clip {
         blueCurveHighlights = o.optDouble("bch", 0.0).toFloat(),
         lutUri = o.optString("lutUri").takeIf { it.isNotBlank() && it != "null" },
         lutIntensity = o.optDouble("lutIntensity", 1.0).toFloat(),
+        maskShape = runCatching { ClipMaskShape.valueOf(o.optString("maskShape", "None")) }.getOrDefault(ClipMaskShape.None),
+        maskCenterX = o.optDouble("maskX", 0.5).toFloat(), maskCenterY = o.optDouble("maskY", 0.5).toFloat(),
+        maskWidth = o.optDouble("maskW", 0.8).toFloat(), maskHeight = o.optDouble("maskH", 0.8).toFloat(),
+        maskFeather = o.optDouble("maskFeather", 0.02).toFloat(), maskInvert = o.optBoolean("maskInvert", false),
         filter = runCatching { Filter.valueOf(o.getString("filter")) }.getOrDefault(Filter.None),
         anim = runCatching { Anim.valueOf(o.getString("anim")) }.getOrDefault(Anim.None),
         fadeInMs = o.optLong("fin", 0L), fadeOutMs = o.optLong("fout", 0L), layers = layers,

@@ -371,6 +371,7 @@ fun buildPreviewGlEffects(c: Clip, context: Context? = null): List<Effect> {
         l += Crop(-1f + 2f * c.cropL, 1f - 2f * c.cropR, -1f + 2f * c.cropB, 1f - 2f * c.cropT)
     }
     addColorEffects(l, c, context, strictLut = false)
+    if (c.maskShape != ClipMaskShape.None) l += ClipMaskEffect(c.maskShape, c.maskCenterX, c.maskCenterY, c.maskWidth, c.maskHeight, c.maskFeather, c.maskInvert)
     return l
 }
 
@@ -397,6 +398,7 @@ fun buildVideoEffects(c: Clip, presentation: Presentation?, forExport: Boolean, 
     if (forExport) fadeEffect(c)?.let { l += it }
     if (forExport && fps > 0) l += FrameDropEffect.createDefaultFrameDropEffect(fps.toFloat())
     if (presentation != null) l += presentation
+    if (c.maskShape != ClipMaskShape.None) l += ClipMaskEffect(c.maskShape, c.maskCenterX, c.maskCenterY, c.maskWidth, c.maskHeight, c.maskFeather, c.maskInvert)
 
     if (forExport && overlayContext != null && overlayLayers.isNotEmpty()) {
         val imageOverlays = overlayLayers

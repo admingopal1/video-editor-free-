@@ -89,7 +89,7 @@ import kotlin.math.abs
 
 enum class Tool(val title: String) {
     Speed("Speed"), Volume("Volume"), Animate("Animation"), Fade("Fade"), Filters("Filters"),
-    Adjust("Adjust"), Crop("Crop"), Transform("Transform"), Text("Text"), Stickers("Stickers"),
+    Adjust("Adjust"), Mask("Mask"), Crop("Crop"), Transform("Transform"), Text("Text"), Stickers("Stickers"),
     Canvas("Canvas & export"), Audio("Audio"), Keyframes("Keyframes"), Transition("Transition")
 }
 
@@ -1119,6 +1119,7 @@ private fun Toolbar(vm: EditorViewModel, clip: Clip?, openTool: (Tool) -> Unit, 
             TB(Ic.Transition, "Transition", Pal.cyan, has) { openTool(Tool.Transition) }
             TB(Ic.Filters, "Filters", Pal.pink, has) { openTool(Tool.Filters) }
             TB(Ic.Sliders, "Adjust", Pal.violet, has) { openTool(Tool.Adjust) }
+            TB(Ic.Crop, "Mask", Pal.pink, vid) { openTool(Tool.Mask) }
             TB(Ic.Crop, "Crop", Pal.cyan, has) { openTool(Tool.Crop) }
             TB(Ic.Rotate, "Transform", Pal.mint, has) { openTool(Tool.Transform) }
             TB(Ic.TextT, "Text", Pal.pink, has) { openTool(Tool.Text) }
@@ -1357,6 +1358,31 @@ private fun ToolPanel(
                     )
                 }
             }) { Text("Reset") }
+        }
+        Tool.Mask -> {
+            if (c.isImage) {
+                Text("Clip masks currently support video clips. Photo mask preview/export will follow with the same rendering path.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            } else {
+                Text("Shape mask · outside the selected shape is removed from the clip alpha. Preview and export share the same GPU effect.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ClipMaskShape.values().forEach { shape ->
+                        FilterChip(selected = c.maskShape == shape, onClick = { vm.update(id) { it.copy(maskShape = shape) } },
+                            label = { Text(when (shape) { ClipMaskShape.None -> "Off"; ClipMaskShape.Rectangle -> "Rectangle"; ClipMaskShape.Ellipse -> "Ellipse" }) })
+                    }
+                }
+                if (c.maskShape != ClipMaskShape.None) {
+                    Slide("Mask center X", c.maskCenterX, 0f..1f, "${(c.maskCenterX * 100).toInt()}%") { v -> vm.update(id) { it.copy(maskCenterX = v) } }
+                    Slide("Mask center Y", c.maskCenterY, 0f..1f, "${(c.maskCenterY * 100).toInt()}%") { v -> vm.update(id) { it.copy(maskCenterY = v) } }
+                    Slide("Mask width", c.maskWidth, 0.05f..1.5f, "${(c.maskWidth * 100).toInt()}%") { v -> vm.update(id) { it.copy(maskWidth = v) } }
+                    Slide("Mask height", c.maskHeight, 0.05f..1.5f, "${(c.maskHeight * 100).toInt()}%") { v -> vm.update(id) { it.copy(maskHeight = v) } }
+                    Slide("Feather", c.maskFeather, 0f..0.25f, "${(c.maskFeather * 100).toInt()}%") { v -> vm.update(id) { it.copy(maskFeather = v) } }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Invert mask", Modifier.weight(1f))
+                        Switch(checked = c.maskInvert, onCheckedChange = { value -> vm.update(id) { it.copy(maskInvert = value) } })
+                    }
+                }
+                TextButton(onClick = { vm.update(id) { it.copy(maskShape = ClipMaskShape.None, maskCenterX = 0.5f, maskCenterY = 0.5f, maskWidth = 0.8f, maskHeight = 0.8f, maskFeather = 0.02f, maskInvert = false) } }) { Text("Reset mask") }
+            }
         }
         Tool.Crop -> {
             Slide("Crop left", c.cropL, 0f..0.45f, "${(c.cropL * 100).toInt()}%") { v -> vm.update(id) { it.copy(cropL = v) } }
