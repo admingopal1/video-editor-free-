@@ -626,19 +626,23 @@ private fun Timeline(
                                                             add(other.timelineEndMs.coerceIn(0L, totalDurationMs))
                                                         }
                                                     }
-                                                    val requestedStart = (layer.timelineStartMs.toDouble() + deltaMs.toDouble())
-                                                        .coerceIn(0.0, totalDurationMs.toDouble()).toLong()
-                                                    val snapped = snapOverlayTimelineStart(
-                                                        requestedStartMs = requestedStart,
-                                                        durationMs = layer.outputMs,
-                                                        totalDurationMs = totalDurationMs,
-                                                        boundariesMs = boundaries,
-                                                        thresholdMs = ((8f / dpPerSec.coerceAtLeast(1f)) * 1_000f)
-                                                            .toLong().coerceIn(60L, 500L)
-                                                    )
-                                                    snapGuideMs = snapped.snappedToMs
-                                                    vm.updateOverlay(layer.id) {
-                                                        it.copy(timelineStartMs = snapped.positionMs)
+                                                    // Read the latest state on every pointer event. The captured `layer`
+                                                    // belongs to the initial composition and becomes stale during a drag.
+                                                    vm.overlayClips.firstOrNull { it.id == layer.id }?.let { movingLayer ->
+                                                        val requestedStart = (movingLayer.timelineStartMs.toDouble() + deltaMs.toDouble())
+                                                            .coerceIn(0.0, totalDurationMs.toDouble()).toLong()
+                                                        val snapped = snapOverlayTimelineStart(
+                                                            requestedStartMs = requestedStart,
+                                                            durationMs = movingLayer.outputMs,
+                                                            totalDurationMs = totalDurationMs,
+                                                            boundariesMs = boundaries,
+                                                            thresholdMs = ((8f / dpPerSec.coerceAtLeast(1f)) * 1_000f)
+                                                                .toLong().coerceIn(60L, 500L)
+                                                        )
+                                                        snapGuideMs = snapped.snappedToMs
+                                                        vm.updateOverlay(layer.id) {
+                                                            it.copy(timelineStartMs = snapped.positionMs)
+                                                        }
                                                     }
                                                 }
                                             }
