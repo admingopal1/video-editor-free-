@@ -143,6 +143,12 @@ fun EditorScreen(vm: EditorViewModel) {
             vm.addAudio(u)
         }
     }
+    val pickOverlayImage = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
+        if (u != null) {
+            runCatching { ctx.contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            vm.addOverlayImage(u)
+        }
+    }
     val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { vm.startExport() }
     val micPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) vm.startVoice()
@@ -179,6 +185,9 @@ fun EditorScreen(vm: EditorViewModel) {
                     else "${vm.clips.size} clips · ${fmt(vm.totalMs)} · ${vm.aspect.label} · ${vm.quality}p",
                     style = MaterialTheme.typography.bodySmall, color = Pal.textLo, maxLines = 1
                 )
+            }
+            TextButton(onClick = { pickOverlayImage.launch(arrayOf("image/*")) }) {
+                Text("＋ PIP", color = Pal.cyan, fontWeight = FontWeight.SemiBold)
             }
             GradientButton("Export", onClick = { requestExport() }, enabled = vm.clips.isNotEmpty(), shimmer = vm.clips.isNotEmpty())
         }
@@ -808,6 +817,32 @@ private fun PreviewStage(vm: EditorViewModel, modifier: Modifier, onAdd: () -> U
                     Image(
                         bitmap = image, contentDescription = null, modifier = mod,
                         contentScale = ContentScale.FillBounds, colorFilter = imageFilter(current)
+                    )
+                }
+            }
+            val activeOverlay = vm.overlayClips
+                .filter { it.isImage && it.isVisibleAt(vm.timeMs) }
+                .maxByOrNull { it.layerOrder }
+            if (activeOverlay != null) {
+                val overlayBitmap by produceState<Bitmap?>(initialValue = vm.overlayBitmap(activeOverlay.uriString), activeOverlay.uriString) {
+                    value = withContext(Dispatchers.IO) { vm.overlayBitmap(activeOverlay.uriString) }
+                }
+                overlayBitmap?.let { imageBitmap ->
+                    Image(
+                        bitmap = imageBitmap.asImageBitmap(),
+                        contentDescription = activeOverlay.name,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .offset(x = canvasW * (activeOverlay.x / 2f), y = -canvasH * (activeOverlay.y / 2f))
+                            .size(width = canvasW * activeOverlay.scale.coerceIn(0.05f, 0.95f), height = canvasH * activeOverlay.scale.coerceIn(0.05f, 0.95f))
+                            .graphicsLayer {
+                                alpha = activeOverlay.opacity
+                                rotationZ = -activeOverlay.rotation
+                            }
+                            .border(1.dp, Color.White.copy(alpha = 0.65f), RoundedCornerShape(6.dp))
+                            .clickable { vm.selectedOverlayId = activeOverlay.id }
+                            .zIndex(5f)
                     )
                 }
             }
