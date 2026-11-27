@@ -754,7 +754,7 @@ private fun Timeline(
                                                     detectHorizontalDragGestures(
                                                         onDragStart = { vm.selectClip(c.id); vm.selectedLayerId = layer.id; vm.beginLayerTimingEdit(); snapGuideMs = null; lastSnapHapticMs = null },
                                                         onDragEnd = { vm.endLayerTimingEdit(); snapGuideMs = null; lastSnapHapticMs = null; vm.onProjectChanged() },
-                                                        onDragCancel = { vm.endLayerTimingEdit(); snapGuideMs = null; lastSnapHapticMs = null },
+                                                        onDragCancel = { vm.endLayerTimingEdit(); snapGuideMs = null; lastSnapHapticMs = null; vm.onProjectChanged() },
                                                         onHorizontalDrag = { change, dragAmount ->
                                                             change.consume()
                                                             val deltaMs = (dragAmount / dpPerSec.coerceAtLeast(1f) * 1_000f).roundToLong()
@@ -794,7 +794,7 @@ private fun Timeline(
                                                     detectHorizontalDragGestures(
                                                         onDragStart = { vm.selectClip(c.id); vm.selectedLayerId = layer.id; vm.beginLayerTimingEdit(); snapGuideMs = null; lastSnapHapticMs = null },
                                                         onDragEnd = { vm.endLayerTimingEdit(); snapGuideMs = null; lastSnapHapticMs = null; vm.onProjectChanged() },
-                                                        onDragCancel = { vm.endLayerTimingEdit(); snapGuideMs = null; lastSnapHapticMs = null },
+                                                        onDragCancel = { vm.endLayerTimingEdit(); snapGuideMs = null; lastSnapHapticMs = null; vm.onProjectChanged() },
                                                         onHorizontalDrag = { change, dragAmount ->
                                                             change.consume()
                                                             val deltaMs = (dragAmount / dpPerSec.coerceAtLeast(1f) * 1_000f).roundToLong()
@@ -838,7 +838,7 @@ private fun Timeline(
                                                     detectHorizontalDragGestures(
                                                         onDragStart = { vm.selectClip(c.id); vm.selectedLayerId = layer.id; vm.beginLayerTimingEdit(); snapGuideMs = null; lastSnapHapticMs = null },
                                                         onDragEnd = { vm.endLayerTimingEdit(); snapGuideMs = null; lastSnapHapticMs = null; vm.onProjectChanged() },
-                                                        onDragCancel = { vm.endLayerTimingEdit(); snapGuideMs = null; lastSnapHapticMs = null },
+                                                        onDragCancel = { vm.endLayerTimingEdit(); snapGuideMs = null; lastSnapHapticMs = null; vm.onProjectChanged() },
                                                         onHorizontalDrag = { change, dragAmount ->
                                                             change.consume()
                                                             val deltaMs = (dragAmount / dpPerSec.coerceAtLeast(1f) * 1_000f).roundToLong()
