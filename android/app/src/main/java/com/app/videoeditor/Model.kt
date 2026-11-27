@@ -42,7 +42,7 @@ const val AUDIO_SYNC_DRIFT_THRESHOLD_MS = 120L
 fun shouldResyncAudioPlayer(currentPositionMs: Long, targetPositionMs: Long, force: Boolean = false): Boolean =
     force || kotlin.math.abs(currentPositionMs - targetPositionMs) > AUDIO_SYNC_DRIFT_THRESHOLD_MS
 
-/** Combines preview gain stages in one bounded operation; muted/solo-excluded tracks are silent. */
+/** Combines preview gain stages; preserves up to 4x gain (2x track volume × 2x automation). */
 fun combinedPreviewAudioGain(
     volume: Float,
     fade: Float,
@@ -51,7 +51,7 @@ fun combinedPreviewAudioGain(
     noiseGate: Float,
     audible: Boolean
 ): Float = if (!audible) 0f else
-    (volume * fade * automation * ducking * noiseGate).takeIf { it.isFinite() }?.coerceIn(0f, 1f) ?: 0f
+    (volume * fade * automation * ducking * noiseGate).takeIf { it.isFinite() }?.coerceIn(0f, 4f) ?: 0f
 
 /** Moves a track ID one position in the visible audio-track order; boundaries are no-ops. */
 fun duplicateAudioTrackName(name: String): String = "$name copy"

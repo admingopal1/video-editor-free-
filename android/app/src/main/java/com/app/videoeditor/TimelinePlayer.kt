@@ -41,8 +41,10 @@ class TimelinePlayer(
 ) {
     private val clipEqA = AudioEqualizerProcessor()
     private val clipEqB = AudioEqualizerProcessor()
-    val playerA: ExoPlayer = ExoPlayer.Builder(ctx, EqualizerRenderersFactory(ctx, clipEqA)).build()
-    val playerB: ExoPlayer = ExoPlayer.Builder(ctx, EqualizerRenderersFactory(ctx, clipEqB)).build()
+    private val clipGainA = AudioGainProcessor()
+    private val clipGainB = AudioGainProcessor()
+    val playerA: ExoPlayer = ExoPlayer.Builder(ctx, EqualizerRenderersFactory(ctx, clipEqA, clipGainA)).build()
+    val playerB: ExoPlayer = ExoPlayer.Builder(ctx, EqualizerRenderersFactory(ctx, clipEqB, clipGainB)).build()
 
     /** Project playhead in output milliseconds. */
     var timeMs by mutableLongStateOf(0L); private set
@@ -69,6 +71,7 @@ class TimelinePlayer(
     private var lastAudioSync = 0L
     private val audioPlayers = HashMap<Long, ExoPlayer>()
     private val audioEqProcessors = HashMap<Long, AudioEqualizerProcessor>()
+    private val audioGainProcessors = HashMap<Long, AudioGainProcessor>()
     private var duckingCacheKey = ""
     private var duckingCache: Map<Long, List<AudioGainPoint>> = emptyMap()
     private var gateCacheKey = ""
@@ -172,6 +175,7 @@ class TimelinePlayer(
         audioPlayers.values.forEach { runCatching { it.release() } }
         audioPlayers.clear()
         audioEqProcessors.clear()
+        audioGainProcessors.clear()
     }
 
     // ---------------------------------------------------------------- internals
@@ -215,7 +219,7 @@ class TimelinePlayer(
             val p = active
             val posMedia = p.currentPosition
             val localOut = (posMedia / c.speed).toLong().coerceIn(0L, c.outputMs)
-            p.volume = clipAudioVolumeAt(c, localOut)
+            setClipAudioGain(p, c, localOut)
             val ended = p.playbackState == Player.STATE_ENDED || posMedia >= c.trimmedMs - 15L
             if (ended) advance(i, clips)
             else if (p.playbackState == Player.STATE_READY) setClock(start + localOut)
@@ -313,16 +317,27 @@ class TimelinePlayer(
         ).build()
 
     private fun configure(p: ExoPlayer, c: Clip, localOutMs: Long = 0L) {
-        if (p === playerA) clipEqA.setGainsDb(c.audioEqGainsDb) else if (p === playerB) clipEqB.setGainsDb(c.audioEqGainsDb)
+        if (p === playerA) {
+            clipEqA.setGainsDb(c.audioEqGainsDb)
+        } else if (p === playerB) {
+            clipEqB.setGainsDb(c.audioEqGainsDb)
+        }
         p.setPlaybackParameters(PlaybackParameters(c.speed))
-        p.volume = clipAudioVolumeAt(c, localOutMs)
+        setClipAudioGain(p, c, localOutMs)
         p.setVideoEffects(buildPreviewGlEffects(c))
+    }
+
+    /** Keep ExoPlayer's post-mixer volume at unity; PCM gain supports the editor's 0–200% range. */
+    private fun setClipAudioGain(p: ExoPlayer, c: Clip, localOutMs: Long) {
+        val gain = clipAudioVolumeAt(c, localOutMs)
+        if (p === playerA) clipGainA.setGain(gain) else if (p === playerB) clipGainB.setGain(gain)
+        p.volume = 1f
     }
 
     private fun clipAudioVolumeAt(c: Clip, localOutMs: Long): Float {
         if (c.muted) return 0f
         val envelope = audioFadeGainAt(localOutMs, c.outputMs, c.audioFadeInMs, c.audioFadeOutMs)
-        return (c.volume * envelope).coerceIn(0f, 1f)
+        return (c.volume * envelope).coerceIn(0f, 2f)
     }
 
     // ---------------------------------------------------------------- audio tracks
@@ -335,6 +350,7 @@ class TimelinePlayer(
         audioPlayers.keys.filter { it !in ids }.forEach { id ->
             audioPlayers.remove(id)?.release()
             audioEqProcessors.remove(id)
+            audioGainProcessors.remove(id)
         }
         val soloActive = tracks.any { it.solo && !it.muted }
         val audibleTracks = tracks.filter { isAudioTrackAudible(it.muted, it.solo, soloActive) }
@@ -357,8 +373,10 @@ class TimelinePlayer(
         for (t in tracks) {
             val p = audioPlayers.getOrPut(t.id) {
                 val eq = AudioEqualizerProcessor(t.eqGainsDb)
+                val gain = AudioGainProcessor()
                 audioEqProcessors[t.id] = eq
-                ExoPlayer.Builder(ctx, EqualizerRenderersFactory(ctx, eq)).build().also { ap ->
+                audioGainProcessors[t.id] = gain
+                ExoPlayer.Builder(ctx, EqualizerRenderersFactory(ctx, eq, gain)).build().also { ap ->
                     ap.setMediaItem(MediaItem.fromUri(t.uri))
                     ap.prepare()
                 }
@@ -370,14 +388,15 @@ class TimelinePlayer(
             val keyframeGain = audioKeyframeGainAt(t.gainPoints, elapsedMs)
             val duckGain = audioKeyframeGainAt(duckingCache[t.id] ?: emptyList(), elapsedMs)
             val gateGain = audioKeyframeGainAt(gateCache[t.id] ?: emptyList(), elapsedMs)
-            p.volume = combinedPreviewAudioGain(
+            audioGainProcessors[t.id]?.setGain(combinedPreviewAudioGain(
                 volume = t.volume,
                 fade = fadeGain,
                 automation = keyframeGain,
                 ducking = duckGain,
                 noiseGate = gateGain,
                 audible = isAudioTrackAudible(t.muted, t.solo, soloActive)
-            )
+            ))
+            p.volume = 1f
             p.repeatMode = if (t.loop && t.fadeInMs == 0L && t.fadeOutMs == 0L && t.gainPoints.isEmpty() && !t.autoDuck && !t.noiseGateEnabled && (duckingCache[t.id].isNullOrEmpty()) && (gateCache[t.id].isNullOrEmpty()) && t.offsetMs == 0L && t.trimEndMs == Long.MAX_VALUE) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
             val wanted = timeMs - t.offsetMs + t.trimStartMs
             val reachedTrimEnd = t.trimEndMs != Long.MAX_VALUE && wanted >= t.trimEndMs
