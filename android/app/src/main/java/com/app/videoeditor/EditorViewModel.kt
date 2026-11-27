@@ -784,6 +784,30 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         audioTracks = audioTracks.map { if (it.id == id) f(it) else it }
     }
 
+    /** Apply a multi-track crossfade as one undoable user action. */
+    fun applyAudioCrossfade(states: Map<Long, AudioCrossfadeState>) {
+        val changed = audioTracks.any { track ->
+            val state = states[track.id] ?: return@any false
+            track.offsetMs != state.offsetMs ||
+                track.trimEndMs != state.trimEndMs ||
+                track.fadeInMs != state.fadeInMs ||
+                track.fadeOutMs != state.fadeOutMs ||
+                track.loop != state.loop
+        }
+        if (!changed) return
+        record(true)
+        audioTracks = audioTracks.map { track ->
+            val state = states[track.id] ?: return@map track
+            track.copy(
+                offsetMs = state.offsetMs,
+                trimEndMs = state.trimEndMs,
+                fadeInMs = state.fadeInMs,
+                fadeOutMs = state.fadeOutMs,
+                loop = state.loop
+            )
+        }
+    }
+
     /** Start one undoable automation gesture; subsequent pointer updates share this snapshot. */
     fun beginAudioAutomationDrag() {
         record(true)
