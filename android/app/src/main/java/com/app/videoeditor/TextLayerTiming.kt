@@ -18,8 +18,12 @@ data class TextLayerTiming(
 
 fun textLayerTiming(layer: TextLayer, clipOutputDurationMs: Long): TextLayerTiming {
     val total = clipOutputDurationMs.coerceAtLeast(0L)
-    val start = (layer.startFrac.coerceIn(0f, 1f).toDouble() * total.toDouble()).roundToLong().coerceIn(0L, total)
-    val end = (layer.endFrac.coerceIn(0f, 1f).toDouble() * total.toDouble()).roundToLong().coerceIn(start, total)
+    // Older or damaged project files can contain NaN/Infinity fractions. Normalize them
+    // before conversion: NaN.roundToLong() throws and would otherwise break timeline rendering.
+    val rawStart = layer.startFrac.takeIf { it.isFinite() } ?: 0f
+    val rawEnd = layer.endFrac.takeIf { it.isFinite() } ?: 1f
+    val start = (rawStart.coerceIn(0f, 1f).toDouble() * total.toDouble()).roundToLong().coerceIn(0L, total)
+    val end = (rawEnd.coerceIn(0f, 1f).toDouble() * total.toDouble()).roundToLong().coerceIn(start, total)
     return TextLayerTiming(start, end)
 }
 
