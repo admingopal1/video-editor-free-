@@ -1,6 +1,5 @@
 package com.app.videoeditor
 
-import android.net.Uri
 import org.json.JSONObject
 
 /**
@@ -12,7 +11,7 @@ import org.json.JSONObject
  */
 data class OverlayClip(
     val id: Long,
-    val uri: Uri,
+    val uriString: String,
     val name: String,
     val durationMs: Long,
     val width: Int,
@@ -53,7 +52,7 @@ fun OverlayClip.isValidOverlayClip(): Boolean =
 
 fun OverlayClip.toJson(): JSONObject = JSONObject().apply {
     put("id", id)
-    put("uri", uri.toString())
+    put("uri", uriString)
     put("name", name)
     put("dur", durationMs)
     put("w", width)
@@ -77,7 +76,7 @@ fun overlayClipFromJson(o: JSONObject): OverlayClip? = runCatching {
     val duration = o.getLong("dur")
     val clip = OverlayClip(
         id = o.getLong("id"),
-        uri = Uri.parse(o.getString("uri")),
+        uriString = o.getString("uri"),
         name = o.optString("name", "Overlay"),
         durationMs = duration,
         width = o.getInt("w"),
