@@ -37,3 +37,19 @@ fun snapOverlayTimelineStart(
         OverlaySnapResult(candidates.first, candidates.first)
     }
 }
+
+/** Applies one drag delta to the latest position without overflowing Long. */
+fun calculateOverlayDragPosition(
+    currentStartMs: Long,
+    deltaMs: Long,
+    totalDurationMs: Long
+): Long {
+    val maxStart = totalDurationMs.coerceAtLeast(0L)
+    val current = currentStartMs.coerceIn(0L, maxStart)
+    val requested = when {
+        deltaMs > 0L && current > Long.MAX_VALUE - deltaMs -> Long.MAX_VALUE
+        deltaMs < 0L && current < Long.MIN_VALUE - deltaMs -> Long.MIN_VALUE
+        else -> current + deltaMs
+    }
+    return requested.coerceIn(0L, maxStart)
+}
