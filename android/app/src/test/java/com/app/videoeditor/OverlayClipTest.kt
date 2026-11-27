@@ -105,6 +105,29 @@ class OverlayClipTest {
     }
 
     @Test
+    fun overlayValidationRejectsNonFiniteAndOutOfRangeEditingValues() {
+        val valid = sample()
+
+        assertFalse(valid.copy(speed = Float.NaN).isValidOverlayClip())
+        assertFalse(valid.copy(speed = Float.POSITIVE_INFINITY).isValidOverlayClip())
+        assertFalse(valid.copy(scale = Float.NEGATIVE_INFINITY).isValidOverlayClip())
+        assertFalse(valid.copy(opacity = -0.01f).isValidOverlayClip())
+        assertFalse(valid.copy(opacity = 1.01f).isValidOverlayClip())
+        assertFalse(valid.copy(volume = -0.01f).isValidOverlayClip())
+        assertFalse(valid.copy(volume = 2.01f).isValidOverlayClip())
+        assertFalse(valid.copy(x = Float.NaN).isValidOverlayClip())
+        assertFalse(valid.copy(y = Float.POSITIVE_INFINITY).isValidOverlayClip())
+        assertFalse(valid.copy(rotation = Float.NaN).isValidOverlayClip())
+    }
+
+    @Test
+    fun overlayVisibilityIsFalseBeforeStartAndAtExclusiveEnd() {
+        val layer = sample()
+        assertFalse(layer.isVisibleAt(-1L))
+        assertFalse(layer.isVisibleAt(layer.timelineEndMs))
+    }
+
+    @Test
     fun invalidOverlayGeometryOrTimingIsRejected() {
         val invalid = sample().copy(endMs = 13_000L)
 
