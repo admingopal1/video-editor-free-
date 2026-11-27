@@ -149,7 +149,7 @@ class TimelinePlayer(
             activateClip(idx, local, isPlaying)
         } else {
             currentIndex = idx
-            configure(active, c)
+            configure(active, c, local)
             prefetch(idx + 1)
         }
         syncAudio(force = true)
@@ -214,9 +214,11 @@ class TimelinePlayer(
         } else {
             val p = active
             val posMedia = p.currentPosition
+            val localOut = (posMedia / c.speed).toLong().coerceIn(0L, c.outputMs)
+            p.volume = clipAudioVolumeAt(c, localOut)
             val ended = p.playbackState == Player.STATE_ENDED || posMedia >= c.trimmedMs - 15L
             if (ended) advance(i, clips)
-            else if (p.playbackState == Player.STATE_READY) setClock(start + (posMedia / c.speed).toLong().coerceAtMost(c.outputMs))
+            else if (p.playbackState == Player.STATE_READY) setClock(start + localOut)
         }
         if (SystemClock.uptimeMillis() - lastAudioSync > 40L) syncAudio(force = false)
     }
@@ -253,18 +255,18 @@ class TimelinePlayer(
             // The next clip is already prepared on the other player: swap, no black frame.
             val old = active
             activeIsA = !activeIsA
-            configure(active, c)
+            configure(active, c, localOutMs)
             active.playWhenReady = play
             old.pause()
         } else if (activeKey() == key) {
-            configure(active, c)
+            configure(active, c, localOutMs)
             active.seekTo(localMedia)
             active.playWhenReady = play
         } else {
             val p = active
             p.setMediaItem(itemOf(c), localMedia)
             p.prepare()
-            configure(p, c)
+            configure(p, c, localOutMs)
             p.playWhenReady = play
             if (activeIsA) { keyA = key; clipIdA = c.id } else { keyB = key; clipIdB = c.id }
         }
@@ -310,11 +312,17 @@ class TimelinePlayer(
             MediaItem.ClippingConfiguration.Builder().setStartPositionMs(c.startMs).setEndPositionMs(c.endMs).build()
         ).build()
 
-    private fun configure(p: ExoPlayer, c: Clip) {
+    private fun configure(p: ExoPlayer, c: Clip, localOutMs: Long = 0L) {
         if (p === playerA) clipEqA.setGainsDb(c.audioEqGainsDb) else if (p === playerB) clipEqB.setGainsDb(c.audioEqGainsDb)
         p.setPlaybackParameters(PlaybackParameters(c.speed))
-        p.volume = if (c.muted) 0f else c.volume.coerceAtMost(1f)
+        p.volume = clipAudioVolumeAt(c, localOutMs)
         p.setVideoEffects(buildPreviewGlEffects(c))
+    }
+
+    private fun clipAudioVolumeAt(c: Clip, localOutMs: Long): Float {
+        if (c.muted) return 0f
+        val envelope = audioFadeGainAt(localOutMs, c.outputMs, c.audioFadeInMs, c.audioFadeOutMs)
+        return (c.volume * envelope).coerceIn(0f, 1f)
     }
 
     // ---------------------------------------------------------------- audio tracks
