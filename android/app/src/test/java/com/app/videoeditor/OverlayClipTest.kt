@@ -30,6 +30,21 @@ class OverlayClipTest {
     )
 
     @Test
+    fun projectDurationIgnoresInvalidSegmentsAndSaturatesOverflow() {
+        val segments = listOf(
+            Triple(0L, 10_000L, 2.0),
+            Triple(5_000L, 5_000L, 1.0),
+            Triple(-1L, 8_000L, 1.0),
+            Triple(0L, 9_000L, 0.0),
+            Triple(0L, 9_000L, Double.NaN),
+            Triple(0L, Long.MAX_VALUE, 0.5)
+        )
+
+        assertEquals(Long.MAX_VALUE, calculateProjectDurationMs(segments))
+        assertEquals(5_000L, calculateProjectDurationMs(listOf(Triple(0L, 10_000L, 2.0))))
+    }
+
+    @Test
     fun overlayLayerRoundTripsAllEditingProperties() {
         val original = sample()
         val restored = overlayClipFromJson(original.toJson())
