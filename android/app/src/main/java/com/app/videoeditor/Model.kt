@@ -33,7 +33,9 @@ data class AudioTrack(
     val volume: Float = 1f,
     val offsetMs: Long = 0L,
     val trimStartMs: Long = 0L,
-    val loop: Boolean = false
+    val loop: Boolean = false,
+    /** Source-media end in milliseconds; Long.MAX_VALUE preserves legacy full-source behavior. */
+    val trimEndMs: Long = Long.MAX_VALUE
 )
 
 fun trimmedDurationMs(startMs: Long, endMs: Long): Long = (endMs - startMs).coerceAtLeast(0L)
@@ -216,11 +218,12 @@ fun clipFromJson(o: JSONObject): Clip {
 
 fun AudioTrack.toJson(): JSONObject = JSONObject().apply {
     put("id", id); put("uri", uri.toString()); put("name", name); put("vol", volume.toDouble())
-    put("off", offsetMs); put("trim", trimStartMs); put("loop", loop)
+    put("off", offsetMs); put("trim", trimStartMs); put("trimEnd", trimEndMs); put("loop", loop)
 }
 
 fun audioFromJson(o: JSONObject): AudioTrack = AudioTrack(
     id = o.getLong("id"), uri = Uri.parse(o.getString("uri")), name = o.optString("name", "Audio"),
     volume = o.optDouble("vol", 1.0).toFloat(), offsetMs = o.optLong("off", 0L),
-    trimStartMs = o.optLong("trim", 0L), loop = o.optBoolean("loop", false)
+    trimStartMs = o.optLong("trim", 0L), loop = o.optBoolean("loop", false),
+    trimEndMs = o.optLong("trimEnd", Long.MAX_VALUE).coerceAtLeast(o.optLong("trim", 0L) + 1L)
 )
