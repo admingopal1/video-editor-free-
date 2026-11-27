@@ -265,7 +265,7 @@ fun EditorScreen(vm: EditorViewModel) {
     vm.overlayClips.firstOrNull { it.id == vm.selectedOverlayId }?.let { layer ->
         AlertDialog(
             onDismissRequest = { vm.selectedOverlayId = null },
-            title = { Text("PIP photo · ${layer.name}") },
+            title = { Text((if (layer.isImage) "PIP photo · " else "PIP video · ") + layer.name) },
             text = {
                 Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
                     Text("Size · ${(layer.scale * 100).toInt()}%")
@@ -278,6 +278,39 @@ fun EditorScreen(vm: EditorViewModel) {
                     Slider(value = layer.opacity, onValueChange = { v -> vm.updateOverlay(layer.id) { it.copy(opacity = v) } }, valueRange = 0f..1f)
                     Text("Rotation · ${layer.rotation.toInt()}°")
                     Slider(value = layer.rotation, onValueChange = { v -> vm.updateOverlay(layer.id) { it.copy(rotation = v) } }, valueRange = -180f..180f)
+                    if (!layer.isImage) {
+                        Text("Source in · ${fmt(layer.startMs)}")
+                        Slider(
+                            value = layer.startMs.toFloat(),
+                            onValueChange = { v ->
+                                vm.updateOverlay(layer.id) {
+                                    val start = v.toLong().coerceIn(0L, it.endMs - 500L)
+                                    it.copy(startMs = start)
+                                }
+                            },
+                            valueRange = 0f..(layer.endMs - 500L).coerceAtLeast(0L).toFloat()
+                        )
+                        Text("Source out · ${fmt(layer.endMs)}")
+                        Slider(
+                            value = layer.endMs.toFloat(),
+                            onValueChange = { v ->
+                                vm.updateOverlay(layer.id) {
+                                    it.copy(endMs = v.toLong().coerceIn(it.startMs + 500L, it.durationMs))
+                                }
+                            },
+                            valueRange = (layer.startMs + 500L).coerceAtMost(layer.durationMs).toFloat()..layer.durationMs.toFloat()
+                        )
+                        Text("Speed · ${String.format(Locale.US, "%.2fx", layer.speed)}")
+                        Slider(value = layer.speed, onValueChange = { v -> vm.updateOverlay(layer.id) { it.copy(speed = v) } }, valueRange = 0.25f..2f)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Mute PIP audio", modifier = Modifier.weight(1f))
+                            Switch(checked = layer.muted, onCheckedChange = { v -> vm.updateOverlay(layer.id) { it.copy(muted = v) } })
+                        }
+                        if (!layer.muted) {
+                            Text("PIP volume · ${(layer.volume * 100).toInt()}%")
+                            Slider(value = layer.volume, onValueChange = { v -> vm.updateOverlay(layer.id) { it.copy(volume = v) } }, valueRange = 0f..2f)
+                        }
+                    }
                 }
             },
             confirmButton = {
@@ -491,7 +524,7 @@ private fun Timeline(
                                     .padding(horizontal = 6.dp),
                                 contentAlignment = Alignment.CenterStart
                             ) {
-                                Text("▣ PIP · ${layer.name}", fontSize = 10.sp, maxLines = 1, color = Color.White)
+                                Text((if (layer.isImage) "▣ PIP photo · " else "▣ PIP video · ") + layer.name, fontSize = 10.sp, maxLines = 1, color = Color.White)
                             }
                         }
                     }
