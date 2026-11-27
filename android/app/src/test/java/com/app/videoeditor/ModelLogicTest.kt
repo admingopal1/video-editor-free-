@@ -2,6 +2,7 @@ package com.app.videoeditor
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import android.net.Uri
 
 class ModelLogicTest {
     @Test
