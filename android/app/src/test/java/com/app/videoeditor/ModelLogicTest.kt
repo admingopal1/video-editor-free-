@@ -131,6 +131,15 @@ class ModelLogicTest {
     }
 
     @Test
+    fun audioPlayerResyncsOnlyAfterDriftThresholdOrWhenForced() {
+        assertEquals(false, shouldResyncAudioPlayer(1_000L, 1_120L))
+        assertEquals(true, shouldResyncAudioPlayer(1_000L, 1_121L))
+        assertEquals(true, shouldResyncAudioPlayer(1_000L, 1_000L, force = true))
+        assertEquals(false, shouldResyncAudioPlayer(2_000L, 1_880L))
+        assertEquals(true, shouldResyncAudioPlayer(2_000L, 1_879L))
+    }
+
+    @Test
     fun crossfadeAlignsNextTrackAndSetsMatchingFadeEnvelopes() {
         val first = AudioCrossfadeState(1L, 0L, 0L, Long.MAX_VALUE, 0L, 0L, true)
         val second = AudioCrossfadeState(2L, 9_000L, 0L, Long.MAX_VALUE, 0L, 0L, true)
