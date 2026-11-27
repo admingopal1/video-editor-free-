@@ -260,10 +260,25 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val old = prefs.getString("project", null) ?: return
         val hasProjects = projectsDir.listFiles { f -> f.extension == "json" }?.isNotEmpty() == true
         if (!hasProjects) {
-            runCatching {
-                val o = JSONObject(old).put("name", "My project").put("updated", System.currentTimeMillis())
-                File(projectsDir, "1.json").writeText(o.toString())
-            }
+            // Do not delete the legacy preference until its replacement is durably written.
+            val migrated = runCatching {
+                val json = JSONObject(old)
+                    .put("name", "My project")
+                    .put("updated", System.currentTimeMillis())
+                    .toString()
+                val destination = AtomicFile(File(projectsDir, "1.json"))
+                var stream: java.io.FileOutputStream? = null
+                try {
+                    stream = destination.startWrite()
+                    stream.write(json.toByteArray(Charsets.UTF_8))
+                    destination.finishWrite(stream)
+                    stream = null
+                } catch (error: Exception) {
+                    stream?.let { destination.failWrite(it) }
+                    throw error
+                }
+            }.isSuccess
+            if (!migrated) return
         }
         prefs.edit().remove("project").apply()
     }
