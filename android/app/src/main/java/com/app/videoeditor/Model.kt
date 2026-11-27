@@ -28,6 +28,11 @@ data class Keyframe(
 
 data class AudioGainPoint(val timeMs: Long, val gain: Float)
 
+
+/** Whether a track should contribute to playback/export under the current mute/solo state. */
+fun isAudioTrackAudible(muted: Boolean, solo: Boolean, anyUnmutedSolo: Boolean): Boolean =
+    !muted && (!anyUnmutedSolo || solo)
+
 data class AudioTrack(
     val id: Long,
     val uri: Uri,

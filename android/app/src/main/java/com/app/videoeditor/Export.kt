@@ -415,7 +415,7 @@ fun buildComposition(
     var loopUsed = false
     val soloActive = tracks.any { it.solo && !it.muted }
     for (t in tracks) {
-        if (t.muted || (soloActive && !t.solo) || t.offsetMs >= totalMs) continue
+        if (!isAudioTrackAudible(t.muted, t.solo, soloActive) || t.offsetMs >= totalMs) continue
         val audioItems = mutableListOf<EditedMediaItem>()
         if (t.offsetMs > 0L) {
             audioItems += EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(makeSilence(ctx, t.offsetMs))))

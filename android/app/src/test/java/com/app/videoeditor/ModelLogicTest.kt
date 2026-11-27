@@ -2,21 +2,15 @@ package com.app.videoeditor
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
-import android.net.Uri
 
 class ModelLogicTest {
     @Test
-    fun audioTrackSoloDefaultsOffAndCanBeEnabled() {
-        val track = AudioTrack(id = 11L, uri = android.net.Uri.parse("file:///audio.wav"), name = "Music")
-        assertEquals(false, track.solo)
-        assertEquals(true, track.copy(solo = true).solo)
-    }
-
-    @Test
-    fun audioTrackMuteDefaultsOffAndCanBeEnabled() {
-        val track = AudioTrack(id = 10L, uri = android.net.Uri.parse("file:///audio.wav"), name = "Voice")
-        assertEquals(false, track.muted)
-        assertEquals(true, track.copy(muted = true).muted)
+    fun audioMuteAndSoloRulesAreConsistent() {
+        assertEquals(true, isAudioTrackAudible(false, false, false))
+        assertEquals(false, isAudioTrackAudible(true, false, false))
+        assertEquals(true, isAudioTrackAudible(false, true, true))
+        assertEquals(false, isAudioTrackAudible(false, false, true))
+        assertEquals(false, isAudioTrackAudible(true, true, true))
     }
 
     @Test
