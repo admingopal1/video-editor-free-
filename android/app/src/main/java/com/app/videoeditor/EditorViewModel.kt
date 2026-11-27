@@ -322,7 +322,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Reconnects one unavailable source while preserving its saved edit metadata. */
     fun relinkMissingMedia(itemKind: String, itemId: Long, uri: Uri) {
-        val item = missingMediaItems.firstOrNull { it.kind == itemKind && it.id == itemId } ?: return
+        val item = findMissingMediaItem(missingMediaItems, itemKind, itemId) ?: return
         viewModelScope.launch {
             try {
                 val mime = ctx.contentResolver.getType(uri).orEmpty()
@@ -458,8 +458,6 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun projectThumb(id: String): Bitmap? = BitmapFactory.decodeFile(File(projectsDir, "$id.jpg").path)
-
-    data class MissingMediaItem(val kind: String, val id: Long, val name: String)
 
     private class Loaded(val o: JSONObject, val clips: List<Clip>, val thumbs: Map<Long, Bitmap>, val dropped: Int, val audio: List<AudioTrack>, val overlays: List<OverlayClip>, val missing: List<MissingMediaItem>, val raw: String)
 
