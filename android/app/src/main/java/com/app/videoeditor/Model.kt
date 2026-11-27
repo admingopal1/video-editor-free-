@@ -36,6 +36,12 @@ fun clampPcmFloatSample(sample: Float): Float = if (sample.isFinite()) sample.co
 fun isAudioTrackAudible(muted: Boolean, solo: Boolean, anyUnmutedSolo: Boolean): Boolean =
     !muted && (!anyUnmutedSolo || solo)
 
+/** Avoid needless player seeks while correcting timeline/audio drift before it becomes noticeable. */
+const val AUDIO_SYNC_DRIFT_THRESHOLD_MS = 120L
+
+fun shouldResyncAudioPlayer(currentPositionMs: Long, targetPositionMs: Long, force: Boolean = false): Boolean =
+    force || kotlin.math.abs(currentPositionMs - targetPositionMs) > AUDIO_SYNC_DRIFT_THRESHOLD_MS
+
 /** Moves a track ID one position in the visible audio-track order; boundaries are no-ops. */
 fun duplicateAudioTrackName(name: String): String = "$name copy"
 
