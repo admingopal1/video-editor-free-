@@ -324,7 +324,7 @@ class TimelinePlayer(
         }
         p.setPlaybackParameters(PlaybackParameters(c.speed))
         setClipAudioGain(p, c, localOutMs)
-        p.setVideoEffects(buildPreviewGlEffects(c))
+        p.setVideoEffects(buildPreviewGlEffects(c, ctx))
     }
 
     /** Keep ExoPlayer's post-mixer volume at unity; PCM gain supports the editor's 0–200% range. */

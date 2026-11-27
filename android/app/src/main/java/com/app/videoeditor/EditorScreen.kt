@@ -4,6 +4,7 @@ package com.app.videoeditor
 
 import android.Manifest
 import android.content.Intent
+import android.widget.Toast
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Typeface
@@ -164,6 +165,22 @@ fun EditorScreen(vm: EditorViewModel) {
             vm.addOverlayImage(u)
         }
     }
+    val pickLut = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
+        val targetId = clip?.id
+        if (u != null && targetId != null) {
+            runCatching { ctx.contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            try {
+                val bytes = ctx.contentResolver.openInputStream(u)?.use { it.readBytes() }
+                    ?: throw IllegalArgumentException("Could not read this LUT file")
+                require(bytes.size <= 8 * 1024 * 1024) { "LUT file must be 8 MiB or smaller" }
+                CubeLut.parse(bytes.toString(Charsets.UTF_8))
+                vm.update(targetId) { it.copy(lutUri = u.toString()) }
+                Toast.makeText(ctx, "3D LUT applied to video clip", Toast.LENGTH_SHORT).show()
+            } catch (error: Exception) {
+                Toast.makeText(ctx, "Invalid LUT: ${error.message ?: "file could not be read"}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
     val pickOverlayVideo = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
         if (u != null) {
             runCatching { ctx.contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
@@ -308,7 +325,7 @@ fun EditorScreen(vm: EditorViewModel) {
                 )
             } else {
                 ToolSheet(t, onDone = { tool = null }) {
-                    ToolPanel(vm, t, clip, pos, kfSel, { kfSel = it }, { pickAudio.launch(arrayOf("audio/*")) }, { recordVoice() })
+                    ToolPanel(vm, t, clip, pos, kfSel, { kfSel = it }, { pickAudio.launch(arrayOf("audio/*")) }, { recordVoice() }, { pickLut.launch(arrayOf("*/*")) })
                 }
             }
         }
@@ -1157,7 +1174,7 @@ private fun Slide(label: String, value: Float, range: ClosedFloatingPointRange<F
 @Composable
 private fun ToolPanel(
     vm: EditorViewModel, tool: Tool, c: Clip?, pos: Long, kfSel: Int, onKfSel: (Int) -> Unit,
-    pickAudio: () -> Unit, record: () -> Unit
+    pickAudio: () -> Unit, record: () -> Unit, pickLut: () -> Unit
 ) {
     if (tool == Tool.Canvas) { CanvasPanel(vm); return }
     if (tool == Tool.Audio) { AudioPanel(vm, pickAudio, record); return }
@@ -1244,6 +1261,13 @@ private fun ToolPanel(
             Slide("Saturation", c.saturation, -1f..1f, f2(c.saturation)) { v -> vm.update(id) { it.copy(saturation = v) } }
             Slide("Warmth", c.warmth, -1f..1f, f2(c.warmth)) { v -> vm.update(id) { it.copy(warmth = v) } }
             Slide("Hue", c.hue, -1f..1f, f2(c.hue)) { v -> vm.update(id) { it.copy(hue = v) } }
+            Text("3D color LUT", fontWeight = FontWeight.SemiBold)
+            Text("Import a .cube look-up table for GPU-based video grading. LUTs are stored with the project; photos are not supported in this first integration.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Button(onClick = pickLut, enabled = !c.isImage) { Text(if (c.lutUri == null) "Import .cube LUT" else "Replace LUT") }
+                if (c.lutUri != null) TextButton(onClick = { vm.update(id) { it.copy(lutUri = null) } }) { Text("Remove") }
+            }
+            if (c.lutUri != null) Text("LUT attached", color = Pal.mint, style = MaterialTheme.typography.bodySmall)
             Text("RGB channel balance", fontWeight = FontWeight.SemiBold)
             Text("Fine-tune red, green and blue independently. 100% is neutral.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
             Slide("Red", c.redGain, 0.5f..1.5f, "${(c.redGain * 100).toInt()}%") { v -> vm.update(id) { it.copy(redGain = v) } }

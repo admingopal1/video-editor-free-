@@ -42,6 +42,7 @@ import androidx.media3.effect.RgbAdjustment
 import androidx.media3.effect.RgbFilter
 import androidx.media3.effect.RgbMatrix
 import androidx.media3.effect.ScaleAndRotateTransformation
+import androidx.media3.effect.SingleColorLut
 import androidx.media3.effect.SpeedChangeEffect
 import androidx.media3.effect.TextOverlay
 import androidx.media3.effect.TextureOverlay
@@ -266,7 +267,7 @@ private fun textOverlays(c: Clip): List<TextureOverlay> =
         }
     }
 
-private fun addColorEffects(l: MutableList<Effect>, c: Clip) {
+private fun addColorEffects(l: MutableList<Effect>, c: Clip, context: Context? = null, strictLut: Boolean = false) {
     if (c.brightness != 0f) l += Brightness(c.brightness)
     if (c.contrast != 0f) l += Contrast(c.contrast)
     if (c.saturation != 0f || c.hue != 0f) {
@@ -316,18 +317,31 @@ private fun addColorEffects(l: MutableList<Effect>, c: Clip) {
             l += Contrast(0.2f)
         }
     }
+    c.lutUri?.let { uriString ->
+        try {
+            val ctx = context ?: throw IllegalStateException("LUT context is unavailable")
+            val bytes = ctx.contentResolver.openInputStream(Uri.parse(uriString))?.use { it.readBytes() }
+                ?: throw IllegalStateException("The selected LUT file is no longer accessible")
+            require(bytes.size <= 8 * 1024 * 1024) { "LUT file exceeds the 8 MiB limit" }
+            val cube = CubeLut.parse(bytes.toString(Charsets.UTF_8)).toMedia3ArgbCube()
+            l += SingleColorLut.createFromCube(cube)
+        } catch (error: Exception) {
+            if (strictLut) throw IllegalStateException("Could not apply the selected 3D LUT: ${error.message}", error)
+            // Keep preview responsive if external storage permission has been revoked.
+        }
+    }
 }
 
 /**
  * GL effects used by the live preview: crop, colour adjustments and filter. Geometry, motion, fades and
  * text are drawn by Compose from the shared PreviewMath so they follow the timeline clock exactly.
  */
-fun buildPreviewGlEffects(c: Clip): List<Effect> {
+fun buildPreviewGlEffects(c: Clip, context: Context? = null): List<Effect> {
     val l = mutableListOf<Effect>()
     if (c.cropL > 0f || c.cropR > 0f || c.cropT > 0f || c.cropB > 0f) {
         l += Crop(-1f + 2f * c.cropL, 1f - 2f * c.cropR, -1f + 2f * c.cropB, 1f - 2f * c.cropT)
     }
-    addColorEffects(l, c)
+    addColorEffects(l, c, context, strictLut = false)
     return l
 }
 
@@ -350,7 +364,7 @@ fun buildVideoEffects(c: Clip, presentation: Presentation?, forExport: Boolean, 
     if (forExport) animEffect(c)?.let { l += it }
     l += kfEffects(c, kfFrac, forExport)
 
-    addColorEffects(l, c)
+    addColorEffects(l, c, overlayContext, strictLut = forExport)
     if (forExport) fadeEffect(c)?.let { l += it }
     if (forExport && fps > 0) l += FrameDropEffect.createDefaultFrameDropEffect(fps.toFloat())
     if (presentation != null) l += presentation
