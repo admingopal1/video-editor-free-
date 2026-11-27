@@ -1644,6 +1644,10 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
             val orderedIndex = orderedAudio.indexOfFirst { it.id == t.id }
             val hasNextAudio = orderedIndex in 0 until orderedAudio.lastIndex
             if (hasNextAudio) {
+                var crossfadeDurationSeconds by remember(t.id) { mutableFloatStateOf(2f) }
+                Slide("Crossfade duration", crossfadeDurationSeconds, 0.5f..5f, String.format(Locale.US, "%.1fs", crossfadeDurationSeconds)) { value ->
+                    crossfadeDurationSeconds = value
+                }
                 val nextTrack = orderedAudio[orderedIndex + 1]
                 val outgoingDurationMs = (vm.waves[t.uri.toString()]?.size ?: 0) * 100L
                 val incomingDurationMs = (vm.waves[nextTrack.uri.toString()]?.size ?: 0) * 100L
@@ -1655,7 +1659,7 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
                     val states = vm.audioTracks.map { track ->
                         AudioCrossfadeState(track.id, track.offsetMs, track.trimStartMs, track.trimEndMs, track.fadeInMs, track.fadeOutMs, track.loop)
                     }
-                    val updated = configureAudioCrossfade(states, t.id, durations, 2_000L).associateBy { it.id }
+                    val updated = configureAudioCrossfade(states, t.id, durations, (crossfadeDurationSeconds * 1000f).toLong()).associateBy { it.id }
                     vm.audioTracks.forEach { original ->
                         val changed = updated[original.id] ?: return@forEach
                         if (changed != AudioCrossfadeState(original.id, original.offsetMs, original.trimStartMs, original.trimEndMs, original.fadeInMs, original.fadeOutMs, original.loop)) {
@@ -1663,7 +1667,7 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
                         }
                     }
                 }, enabled = canCrossfade, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (canCrossfade) "Crossfade into next track · 2s" else "Load both waveforms to enable crossfade")
+                    Text(if (canCrossfade) "Apply ${String.format(Locale.US, "%.1f", crossfadeDurationSeconds)}s crossfade into next track" else "Load both waveforms to enable crossfade")
                 }
             }
             if (t.loop && (t.fadeInMs > 0L || t.fadeOutMs > 0L || t.gainPoints.isNotEmpty() || t.eqGainsDb.any { it != 0f })) {
