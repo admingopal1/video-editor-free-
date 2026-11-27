@@ -1,5 +1,7 @@
 package com.app.videoeditor
 
+import kotlin.math.roundToInt
+
 /**
  * Lightweight master RGB tone curve represented by shadow, midtone and highlight offsets.
  * The curve is baked into a 3D LUT so preview and export use the same GPU operation.
@@ -25,8 +27,8 @@ data class ToneCurve(
                 IntArray(size) { b ->
                     val d = (size - 1).toFloat()
                     val red = (sample(r / d) * 255f).roundToInt()
-                    val green = (sample(g / d) * 255f).toInt()
-                    val blue = (sample(b / d) * 255f).toInt()
+                    val green = (sample(g / d) * 255f).roundToInt()
+                    val blue = (sample(b / d) * 255f).roundToInt()
                     (0xFF shl 24) or (red shl 16) or (green shl 8) or blue
                 }
             }
