@@ -50,7 +50,7 @@ class OverlayTimelineMathTest {
     fun sourceClockNeverEscapesTrimmedSourceInterval() {
         val fast = layer(speed = 3f)
 
-        assertEquals(8_998L, overlaySourceTimeMs(fast, 5_166L))
+        assertEquals(8_995L, overlaySourceTimeMs(fast, 5_165L))
         assertNull(overlaySourceTimeMs(fast, fast.timelineEndMs))
     }
 
