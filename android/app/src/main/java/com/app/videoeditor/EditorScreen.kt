@@ -1424,6 +1424,10 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
                 Slide("Skip first", t.trimStartMs / 1000f, 0f..(dur - 1f), String.format(Locale.US, "%.1fs", t.trimStartMs / 1000f)) { v ->
                     vm.updateAudio(t.id) { it.copy(trimStartMs = (v * 10).toLong() * 100L) }
                 }
+                val endSeconds = if (t.trimEndMs == Long.MAX_VALUE) dur else (t.trimEndMs / 1000f).coerceIn(t.trimStartMs / 1000f + 0.1f, dur)
+                Slide("Trim end", endSeconds, (t.trimStartMs / 1000f + 0.1f)..dur, String.format(Locale.US, "%.1fs", endSeconds)) { v ->
+                    vm.updateAudio(t.id) { it.copy(trimEndMs = (v * 10).toLong() * 100L, loop = false) }
+                }
             }
             if (t.offsetMs == 0L) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
