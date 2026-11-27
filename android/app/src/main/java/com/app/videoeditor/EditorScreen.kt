@@ -615,6 +615,7 @@ private fun Timeline(
                                                 (px - point.x) * (px - point.x) + (py - point.y) * (py - point.y)
                                             } ?: -1
                                             if (selectedIndex >= 0) {
+                                                vm.beginAudioAutomationDrag()
                                                 val p = points[selectedIndex]
                                                 val px = p.timeMs.toFloat() / (w / dpPerSec * 1000f).coerceAtLeast(1f) * size.width
                                                 val py = (1f - p.gain.coerceIn(0f, 2f) / 2f) * size.height
@@ -628,7 +629,7 @@ private fun Timeline(
                                                 val durationMs = (w / dpPerSec * 1000f).toLong().coerceAtLeast(1L)
                                                 val targetTime = (change.position.x / size.width.toFloat().coerceAtLeast(1f) * durationMs).toLong().coerceAtLeast(0L)
                                                 val targetGain = (2f * (1f - change.position.y / size.height.toFloat().coerceAtLeast(1f))).coerceIn(0f, 2f)
-                                                vm.updateAudio(t.id) { track ->
+                                                vm.updateAudioAutomationDuringDrag(t.id) { track ->
                                                     val pts = track.gainPoints
                                                     if (index !in pts.indices) track else {
                                                         val lower = if (index > 0) pts[index - 1].timeMs + 1L else 0L
