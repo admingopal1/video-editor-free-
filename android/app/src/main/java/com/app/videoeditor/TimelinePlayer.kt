@@ -364,7 +364,7 @@ class TimelinePlayer(
                 }
             }
             audioEqProcessors[t.id]?.setGainsDb(t.eqGainsDb)
-            val trackDurationMs = (minOf(t.trimEndMs, t.trimStartMs + (totalMs() - t.offsetMs).coerceAtLeast(0L)) - t.trimStartMs).coerceAtLeast(1L)
+            val trackDurationMs = audioTrackOutputDurationMs(t.trimStartMs, t.trimEndMs, t.offsetMs, totalMs()).coerceAtLeast(1L)
             val elapsedMs = (timeMs - t.offsetMs).coerceAtLeast(0L)
             val fadeGain = audioFadeGainAt(elapsedMs, trackDurationMs, t.fadeInMs, t.fadeOutMs)
             val keyframeGain = audioKeyframeGainAt(t.gainPoints, elapsedMs)
