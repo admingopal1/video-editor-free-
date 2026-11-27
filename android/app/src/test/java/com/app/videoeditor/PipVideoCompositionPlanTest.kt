@@ -85,6 +85,26 @@ class PipVideoCompositionPlanTest {
     }
 
     @Test
+    fun compositorVisibilityHidesLeadingAndTrailingGapFrames() {
+        val input = buildPipVideoCompositionPlan(
+            listOf(layer(40L, 0, timelineStartMs = 2_000L))
+        ).videoInputs.single()
+
+        assertTrue(!isPipVideoInputVisible(input, 1_999_999L))
+        assertTrue(isPipVideoInputVisible(input, 2_000_000L))
+        assertTrue(isPipVideoInputVisible(input, 3_999_999L))
+        assertTrue(!isPipVideoInputVisible(input, 4_000_000L))
+        assertTrue(!isPipVideoInputVisible(input, -1L))
+    }
+
+    @Test
+    fun compositorUsesPrimaryVideoInputForOutputSizeIndex() {
+        assertEquals(2, pipPrimaryInputIndex(primaryInputId = 2, inputCount = 3))
+        assertEquals(1, pipPrimaryInputIndex(primaryInputId = 9, inputCount = 2))
+        assertEquals(-1, pipPrimaryInputIndex(primaryInputId = 0, inputCount = 0))
+    }
+
+    @Test
     fun emptyOrImageOnlyProjectsHaveNoVideoInputs() {
         val empty = buildPipVideoCompositionPlan(emptyList())
         assertTrue(empty.videoInputs.isEmpty())
