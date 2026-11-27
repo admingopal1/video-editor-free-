@@ -385,6 +385,9 @@ fun isValidTint(tint: Float): Boolean = tint.isFinite() && tint in -1f..1f
 fun isValidToneCurve(shadows: Float, midtones: Float, highlights: Float): Boolean =
     listOf(shadows, midtones, highlights).all { it.isFinite() && it in -0.2f..0.2f }
 
+fun isValidRgbCurves(values: List<Float>): Boolean =
+    values.size == 9 && values.all { it.isFinite() && it in -0.2f..0.2f }
+
 fun isValidHslMixer(adjustments: List<Float>): Boolean =
     adjustments.size == 8 && adjustments.all { it.isFinite() && it in -1f..1f }
 
@@ -419,7 +422,8 @@ fun isValidProjectClipMetadata(
     midtonesTint: Float = 0f,
     highlightsTemperature: Float = 0f,
     highlightsTint: Float = 0f,
-    hslMixer: List<Float> = List(8) { 0f }
+    hslMixer: List<Float> = List(8) { 0f },
+    rgbCurves: List<Float> = List(9) { 0f }
 ): Boolean =
     id > 0L &&
         uriString.isNotBlank() &&
@@ -433,14 +437,16 @@ fun isValidProjectClipMetadata(
         isValidColorChannelGain(redGain, greenGain, blueGain) &&
         isValidTint(tint) &&
         isValidColorWheels(shadowsTemperature, shadowsTint, midtonesTemperature, midtonesTint, highlightsTemperature, highlightsTint) &&
-        isValidHslMixer(hslMixer)
+        isValidHslMixer(hslMixer) &&
+        isValidRgbCurves(rgbCurves)
 
 fun Clip.isValidProjectClip(): Boolean = isValidProjectClipMetadata(
     id, uri.toString(), durationMs, width, height, startMs, endMs, speed, volume, zoom,
     listOf(cropL, cropR, cropT, cropB, brightness, contrast, saturation, warmth, hue),
     redGain, greenGain, blueGain, tint,
     shadowsTemperature, shadowsTint, midtonesTemperature, midtonesTint, highlightsTemperature, highlightsTint,
-    listOf(hslRed, hslOrange, hslYellow, hslGreen, hslAqua, hslBlue, hslPurple, hslMagenta)
+    listOf(hslRed, hslOrange, hslYellow, hslGreen, hslAqua, hslBlue, hslPurple, hslMagenta),
+    listOf(redCurveShadows, redCurveMidtones, redCurveHighlights, greenCurveShadows, greenCurveMidtones, greenCurveHighlights, blueCurveShadows, blueCurveMidtones, blueCurveHighlights)
 )
 
 data class Clip(
@@ -494,6 +500,16 @@ data class Clip(
     val hslBlue: Float = 0f,
     val hslPurple: Float = 0f,
     val hslMagenta: Float = 0f,
+    /** Per-channel RGB curve controls: shadows, midtones, highlights. Zero is identity. */
+    val redCurveShadows: Float = 0f,
+    val redCurveMidtones: Float = 0f,
+    val redCurveHighlights: Float = 0f,
+    val greenCurveShadows: Float = 0f,
+    val greenCurveMidtones: Float = 0f,
+    val greenCurveHighlights: Float = 0f,
+    val blueCurveShadows: Float = 0f,
+    val blueCurveMidtones: Float = 0f,
+    val blueCurveHighlights: Float = 0f,
     /** Persisted document URI for an optional 3D .cube color LUT. */
     val lutUri: String? = null,
     val filter: Filter = Filter.None,
@@ -533,6 +549,9 @@ fun Clip.toJson(): JSONObject = JSONObject().apply {
     put("hslY", hslYellow.toDouble()); put("hslG", hslGreen.toDouble())
     put("hslA", hslAqua.toDouble()); put("hslB", hslBlue.toDouble())
     put("hslP", hslPurple.toDouble()); put("hslM", hslMagenta.toDouble())
+    put("rcs", redCurveShadows.toDouble()); put("rcm", redCurveMidtones.toDouble()); put("rch", redCurveHighlights.toDouble())
+    put("gcs", greenCurveShadows.toDouble()); put("gcm", greenCurveMidtones.toDouble()); put("gch", greenCurveHighlights.toDouble())
+    put("bcs", blueCurveShadows.toDouble()); put("bcm", blueCurveMidtones.toDouble()); put("bch", blueCurveHighlights.toDouble())
     put("lutUri", lutUri ?: JSONObject.NULL)
     put("filter", filter.name); put("anim", anim.name); put("fin", fadeInMs); put("fout", fadeOutMs)
     put("audioEq", JSONArray().apply { audioEqGainsDb.forEach { put(it.toDouble()) } })
@@ -620,6 +639,15 @@ fun clipFromJson(o: JSONObject): Clip {
         hslBlue = o.optDouble("hslB", 0.0).toFloat(),
         hslPurple = o.optDouble("hslP", 0.0).toFloat(),
         hslMagenta = o.optDouble("hslM", 0.0).toFloat(),
+        redCurveShadows = o.optDouble("rcs", 0.0).toFloat(),
+        redCurveMidtones = o.optDouble("rcm", 0.0).toFloat(),
+        redCurveHighlights = o.optDouble("rch", 0.0).toFloat(),
+        greenCurveShadows = o.optDouble("gcs", 0.0).toFloat(),
+        greenCurveMidtones = o.optDouble("gcm", 0.0).toFloat(),
+        greenCurveHighlights = o.optDouble("gch", 0.0).toFloat(),
+        blueCurveShadows = o.optDouble("bcs", 0.0).toFloat(),
+        blueCurveMidtones = o.optDouble("bcm", 0.0).toFloat(),
+        blueCurveHighlights = o.optDouble("bch", 0.0).toFloat(),
         lutUri = o.optString("lutUri").takeIf { it.isNotBlank() && it != "null" },
         filter = runCatching { Filter.valueOf(o.getString("filter")) }.getOrDefault(Filter.None),
         anim = runCatching { Anim.valueOf(o.getString("anim")) }.getOrDefault(Anim.None),

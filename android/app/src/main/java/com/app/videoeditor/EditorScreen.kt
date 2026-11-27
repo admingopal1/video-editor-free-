@@ -1267,6 +1267,24 @@ private fun ToolPanel(
             Slide("Shadows", c.toneShadows, -0.2f..0.2f, f2(c.toneShadows)) { v -> vm.update(id) { it.copy(toneShadows = v) } }
             Slide("Midtones", c.toneMidtones, -0.2f..0.2f, f2(c.toneMidtones)) { v -> vm.update(id) { it.copy(toneMidtones = v) } }
             Slide("Highlights", c.toneHighlights, -0.2f..0.2f, f2(c.toneHighlights)) { v -> vm.update(id) { it.copy(toneHighlights = v) } }
+            Text("RGB channel curves", fontWeight = FontWeight.SemiBold)
+            Text("Shape shadows, midtones and highlights independently for red, green and blue. Smooth GPU curves are shared by preview and export.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            if (!c.isImage) {
+                Text("Red channel", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                Slide("Red shadows", c.redCurveShadows, -0.2f..0.2f, f2(c.redCurveShadows)) { v -> vm.update(id) { it.copy(redCurveShadows = v) } }
+                Slide("Red midtones", c.redCurveMidtones, -0.2f..0.2f, f2(c.redCurveMidtones)) { v -> vm.update(id) { it.copy(redCurveMidtones = v) } }
+                Slide("Red highlights", c.redCurveHighlights, -0.2f..0.2f, f2(c.redCurveHighlights)) { v -> vm.update(id) { it.copy(redCurveHighlights = v) } }
+                Text("Green channel", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                Slide("Green shadows", c.greenCurveShadows, -0.2f..0.2f, f2(c.greenCurveShadows)) { v -> vm.update(id) { it.copy(greenCurveShadows = v) } }
+                Slide("Green midtones", c.greenCurveMidtones, -0.2f..0.2f, f2(c.greenCurveMidtones)) { v -> vm.update(id) { it.copy(greenCurveMidtones = v) } }
+                Slide("Green highlights", c.greenCurveHighlights, -0.2f..0.2f, f2(c.greenCurveHighlights)) { v -> vm.update(id) { it.copy(greenCurveHighlights = v) } }
+                Text("Blue channel", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                Slide("Blue shadows", c.blueCurveShadows, -0.2f..0.2f, f2(c.blueCurveShadows)) { v -> vm.update(id) { it.copy(blueCurveShadows = v) } }
+                Slide("Blue midtones", c.blueCurveMidtones, -0.2f..0.2f, f2(c.blueCurveMidtones)) { v -> vm.update(id) { it.copy(blueCurveMidtones = v) } }
+                Slide("Blue highlights", c.blueCurveHighlights, -0.2f..0.2f, f2(c.blueCurveHighlights)) { v -> vm.update(id) { it.copy(blueCurveHighlights = v) } }
+            } else {
+                Text("RGB channel curves are currently available for video clips; photo preview support will follow.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            }
             Text("Three-way color wheels", fontWeight = FontWeight.SemiBold)
             Text("Grade shadows, midtones and highlights independently. Temperature shifts blue ↔ amber; tint shifts green ↔ magenta. GPU grading applies to video clips.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
             Text("Shadows", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
@@ -1325,7 +1343,10 @@ private fun ToolPanel(
                         midtonesTemperature = 0f, midtonesTint = 0f,
                         highlightsTemperature = 0f, highlightsTint = 0f,
                         hslRed = 0f, hslOrange = 0f, hslYellow = 0f, hslGreen = 0f,
-                        hslAqua = 0f, hslBlue = 0f, hslPurple = 0f, hslMagenta = 0f
+                        hslAqua = 0f, hslBlue = 0f, hslPurple = 0f, hslMagenta = 0f,
+                        redCurveShadows = 0f, redCurveMidtones = 0f, redCurveHighlights = 0f,
+                        greenCurveShadows = 0f, greenCurveMidtones = 0f, greenCurveHighlights = 0f,
+                        blueCurveShadows = 0f, blueCurveMidtones = 0f, blueCurveHighlights = 0f
                     )
                 }
             }) { Text("Reset") }
