@@ -1430,6 +1430,26 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
                     vm.updateAudio(t.id) { it.copy(trimEndMs = (v * 10).toLong() * 100L, loop = false) }
                 }
             }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Volume automation", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                TextButton(onClick = {
+                    val pointTime = (vm.timeline.timeMs - t.offsetMs).coerceAtLeast(0L)
+                    vm.updateAudio(t.id) { track ->
+                        val point = AudioGainPoint(pointTime, track.volume.coerceIn(0f, 2f))
+                        track.copy(gainPoints = (track.gainPoints.filter { kotlin.math.abs(it.timeMs - pointTime) > 50L } + point).sortedBy { it.timeMs })
+                    }
+                }) { Text("＋ Add point here") }
+            }
+            t.gainPoints.forEachIndexed { index, point ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(String.format(Locale.US, "%.1fs", point.timeMs / 1000f), Modifier.width(48.dp), style = MaterialTheme.typography.labelSmall)
+                    Slider(value = point.gain.coerceIn(0f, 2f), onValueChange = { value ->
+                        vm.updateAudio(t.id) { track -> track.copy(gainPoints = track.gainPoints.mapIndexed { i, old -> if (i == index) old.copy(gain = value) else old }) }
+                    }, valueRange = 0f..2f, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { vm.updateAudio(t.id) { track -> track.copy(gainPoints = track.gainPoints.filterIndexed { i, _ -> i != index }) } }) { Text("Remove") }
+                }
+            }
+            if (t.gainPoints.isNotEmpty()) Text("Gain points are interpolated between timeline positions in preview and export.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
             val fadeMaxSeconds = (if (dur > 0f) minOf(dur / 2f, 10f) else 10f).coerceAtLeast(0.1f)
             Slide("Fade in", t.fadeInMs / 1000f, 0f..fadeMaxSeconds, String.format(Locale.US, "%.1fs", t.fadeInMs / 1000f)) { v ->
                 vm.updateAudio(t.id) { it.copy(fadeInMs = (v * 100f).toLong() * 10L, loop = false) }
