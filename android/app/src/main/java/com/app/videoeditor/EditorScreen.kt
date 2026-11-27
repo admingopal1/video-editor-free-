@@ -19,6 +19,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -594,12 +595,78 @@ private fun Timeline(
                     val len = if (wave != null && wave.isNotEmpty()) (sourceEndSec - t.trimStartMs / 1000f).coerceAtLeast(0.1f) * dpPerSec else left
                     val w = maxOf(if (t.loop && t.offsetMs == 0L) left else minOf(len, left), 40f)
                     Box(
-                        Modifier.padding(top = 4.dp).offset(x = x.dp).width(w.dp).height(26.dp).clip(RoundedCornerShape(8.dp))
-                            .background(Brush.horizontalGradient(listOf(Color(0xFF0F9D75), Pal.cyan))).clickable { openTool(Tool.Audio) },
+                        Modifier.padding(top = 4.dp).offset(x = x.dp).width(w.dp).height(if (t.gainPoints.isEmpty()) 26.dp else 54.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Brush.horizontalGradient(listOf(Color(0xFF0F9D75), Pal.cyan)))
+                            .clickable { openTool(Tool.Audio) },
                         contentAlignment = Alignment.CenterStart
                     ) {
-                        WaveBars(wave, t.trimStartMs, t.trimStartMs + (w / dpPerSec * 1000f).toLong(), Color(0x99FFFFFF), Modifier.fillMaxSize())
-                        Text(" ♪ ${t.name.take(22)}", fontSize = 10.sp, maxLines = 1, color = Color.White)
+                        WaveBars(wave, t.trimStartMs, t.trimStartMs + (w / dpPerSec * 1000f).toLong(), Color(0x66FFFFFF), Modifier.fillMaxSize())
+                        if (t.gainPoints.isNotEmpty()) {
+                            Canvas(
+                                Modifier.fillMaxSize().pointerInput(t.id, w, dpPerSec) {
+                                    var selectedIndex = -1
+                                    detectDragGestures(
+                                        onDragStart = { point ->
+                                            val points = t.gainPoints
+                                            selectedIndex = points.indices.minByOrNull { i ->
+                                                val px = points[i].timeMs.toFloat() / (w / dpPerSec * 1000f).coerceAtLeast(1f) * size.width
+                                                val py = (1f - points[i].gain.coerceIn(0f, 2f) / 2f) * size.height
+                                                (px - point.x) * (px - point.x) + (py - point.y) * (py - point.y)
+                                            } ?: -1
+                                            if (selectedIndex >= 0) {
+                                                val p = points[selectedIndex]
+                                                val px = p.timeMs.toFloat() / (w / dpPerSec * 1000f).coerceAtLeast(1f) * size.width
+                                                val py = (1f - p.gain.coerceIn(0f, 2f) / 2f) * size.height
+                                                if (kotlin.math.hypot((px - point.x).toDouble(), (py - point.y).toDouble()) > 36.0) selectedIndex = -1
+                                            }
+                                        },
+                                        onDrag = { change, _ ->
+                                            change.consume()
+                                            val index = selectedIndex
+                                            if (index >= 0) {
+                                                val durationMs = (w / dpPerSec * 1000f).toLong().coerceAtLeast(1L)
+                                                val targetTime = (change.position.x / size.width.coerceAtLeast(1f) * durationMs).toLong().coerceAtLeast(0L)
+                                                val targetGain = (2f * (1f - change.position.y / size.height.coerceAtLeast(1f))).coerceIn(0f, 2f)
+                                                vm.updateAudio(t.id) { track ->
+                                                    val pts = track.gainPoints
+                                                    if (index !in pts.indices) track else {
+                                                        val lower = if (index > 0) pts[index - 1].timeMs + 1L else 0L
+                                                        val upper = if (index < pts.lastIndex) (pts[index + 1].timeMs - 1L).coerceAtLeast(lower) else durationMs
+                                                        val movedTime = targetTime.coerceIn(lower, upper.coerceAtLeast(lower))
+                                                        track.copy(
+                                                            gainPoints = pts.mapIndexed { i, old ->
+                                                                if (i == index) old.copy(timeMs = movedTime, gain = targetGain) else old
+                                                            }
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        onDragEnd = { selectedIndex = -1 },
+                                        onDragCancel = { selectedIndex = -1 }
+                                    )
+                                }
+                            ) {
+                                val durationMs = (w / dpPerSec * 1000f).toLong().coerceAtLeast(1L)
+                                val points = t.gainPoints
+                                val path = androidx.compose.ui.graphics.Path()
+                                points.forEachIndexed { index, point ->
+                                    val px = (point.timeMs.toFloat() / durationMs).coerceIn(0f, 1f) * size.width
+                                    val py = (1f - point.gain.coerceIn(0f, 2f) / 2f) * size.height
+                                    if (index == 0) path.moveTo(px, py) else path.lineTo(px, py)
+                                }
+                                if (points.size > 1) drawPath(path, Color(0xFFFFE082), style = Stroke(width = 3.dp.toPx()))
+                                points.forEach { point ->
+                                    val px = (point.timeMs.toFloat() / durationMs).coerceIn(0f, 1f) * size.width
+                                    val py = (1f - point.gain.coerceIn(0f, 2f) / 2f) * size.height
+                                    drawCircle(Color(0xFFFFE082), radius = 6.dp.toPx(), center = Offset(px, py))
+                                    drawCircle(Color(0xFF332600), radius = 2.dp.toPx(), center = Offset(px, py))
+                                }
+                            }
+                        }
+                        Text(" ♪ ${t.name.take(22)}", fontSize = 10.sp, maxLines = 1, color = Color.White,
+                            modifier = Modifier.align(Alignment.TopStart).padding(start = 6.dp, top = 2.dp))
                     }
                 }
             }
