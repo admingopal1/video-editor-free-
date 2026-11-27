@@ -871,55 +871,11 @@ private fun PreviewStage(vm: EditorViewModel, modifier: Modifier, onAdd: () -> U
     val tl = vm.timeline
     val viewA = remember { (LayoutInflater.from(ctx).inflate(R.layout.player_texture, null) as PlayerView).also { it.player = tl.playerA } }
     val viewB = remember { (LayoutInflater.from(ctx).inflate(R.layout.player_texture, null) as PlayerView).also { it.player = tl.playerB } }
-    val pipVideoPlayer = remember { ExoPlayer.Builder(ctx).build() }
-    val pipVideoView = remember {
-        (LayoutInflater.from(ctx).inflate(R.layout.player_texture, null) as PlayerView).also {
-            it.player = pipVideoPlayer
-            it.useController = false
-            it.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-        }
-    }
-    DisposableEffect(pipVideoPlayer) {
-        onDispose { pipVideoPlayer.release() }
-    }
     val current = vm.clips.getOrNull(tl.currentIndex)
     val localOutMs = tl.localOutMs()
-    val activeOverlayVideo = vm.overlayClips
+    val activeOverlayVideos = vm.overlayClips
         .filter { !it.isImage && it.isVisibleAt(vm.timeMs) }
-        .maxByOrNull { it.layerOrder }
-
-    LaunchedEffect(activeOverlayVideo?.id, activeOverlayVideo?.uriString) {
-        val layer = activeOverlayVideo
-        if (layer == null) {
-            pipVideoPlayer.pause()
-            pipVideoPlayer.clearMediaItems()
-        } else {
-            val item = MediaItem.Builder().setUri(Uri.parse(layer.uriString))
-                .setClippingConfiguration(
-                    MediaItem.ClippingConfiguration.Builder()
-                        .setStartPositionMs(layer.startMs)
-                        .setEndPositionMs(layer.endMs)
-                        .build()
-                ).build()
-            pipVideoPlayer.setMediaItem(item)
-            pipVideoPlayer.setPlaybackParameters(PlaybackParameters(layer.speed))
-            pipVideoPlayer.volume = if (layer.muted) 0f else layer.volume.coerceIn(0f, 1f)
-            pipVideoPlayer.prepare()
-        }
-    }
-    LaunchedEffect(activeOverlayVideo?.id, vm.isPlaying) {
-        val layer = activeOverlayVideo ?: return@LaunchedEffect
-        val local = (vm.timeMs - layer.timelineStartMs).coerceAtLeast(0L)
-        pipVideoPlayer.seekTo((local * layer.speed).toLong().coerceIn(0L, layer.trimmedMs))
-        if (vm.isPlaying) pipVideoPlayer.play() else pipVideoPlayer.pause()
-    }
-    LaunchedEffect(activeOverlayVideo?.id, vm.timeMs) {
-        val layer = activeOverlayVideo ?: return@LaunchedEffect
-        if (!vm.isPlaying) {
-            val local = (vm.timeMs - layer.timelineStartMs).coerceAtLeast(0L)
-            pipVideoPlayer.seekTo((local * layer.speed).toLong().coerceIn(0L, layer.trimmedMs))
-        }
-    }
+        .sortedBy { it.layerOrder }
 
     BoxWithConstraints(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
         val first = vm.clips.firstOrNull()
@@ -969,24 +925,19 @@ private fun PreviewStage(vm: EditorViewModel, modifier: Modifier, onAdd: () -> U
                     )
                 }
             }
-            if (activeOverlayVideo != null) {
-                AndroidView(
-                    factory = { pipVideoView },
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .offset(x = canvasW * (activeOverlayVideo.x / 2f), y = -canvasH * (activeOverlayVideo.y / 2f))
-                        .size(
-                            width = canvasW * activeOverlayVideo.scale.coerceIn(0.05f, 0.95f),
-                            height = canvasH * activeOverlayVideo.scale.coerceIn(0.05f, 0.95f)
-                        )
-                        .graphicsLayer {
-                            alpha = activeOverlayVideo.opacity
-                            rotationZ = -activeOverlayVideo.rotation
-                        }
-                        .border(1.dp, Color.White.copy(alpha = 0.65f), RoundedCornerShape(6.dp))
-                        .clickable { vm.selectedOverlayId = activeOverlayVideo.id }
-                        .zIndex(5f)
-                )
+            // Each active video PIP owns an independent decoder/player, so overlapping layers
+            // remain visible together and retain their own trim, speed, transform and audio settings.
+            activeOverlayVideos.forEach { videoLayer ->
+                key(videoLayer.id) {
+                    PipVideoPreviewLayer(
+                        layer = videoLayer,
+                        projectTimeMs = vm.timeMs,
+                        isPlaying = vm.isPlaying,
+                        canvasW = canvasW,
+                        canvasH = canvasH,
+                        onSelect = { vm.selectedOverlayId = videoLayer.id }
+                    )
+                }
             }
             // Render every active photo PIP layer in layer order, not only the topmost one.
             vm.overlayClips
@@ -1053,6 +1004,79 @@ private fun PreviewStage(vm: EditorViewModel, modifier: Modifier, onAdd: () -> U
             }
         }
     }
+}
+
+/**
+ * A separately clocked Media3 player for one PIP video layer. Keeping this as a keyed
+ * composable gives every overlapping layer its own decoder and guarantees release when
+ * the playhead leaves that layer's visible interval.
+ */
+@Composable
+private fun PipVideoPreviewLayer(
+    layer: OverlayClip,
+    projectTimeMs: Long,
+    isPlaying: Boolean,
+    canvasW: Dp,
+    canvasH: Dp,
+    onSelect: () -> Unit
+) {
+    val ctx = LocalContext.current
+    val player = remember(layer.id) { ExoPlayer.Builder(ctx).build() }
+    val playerView = remember(player) {
+        (LayoutInflater.from(ctx).inflate(R.layout.player_texture, null) as PlayerView).also {
+            it.player = player
+            it.useController = false
+            it.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+        }
+    }
+
+    DisposableEffect(player) {
+        onDispose { player.release() }
+    }
+
+    LaunchedEffect(layer.uriString, layer.startMs, layer.endMs, layer.speed, layer.muted, layer.volume) {
+        val item = MediaItem.Builder().setUri(Uri.parse(layer.uriString))
+            .setClippingConfiguration(
+                MediaItem.ClippingConfiguration.Builder()
+                    .setStartPositionMs(layer.startMs)
+                    .setEndPositionMs(layer.endMs)
+                    .build()
+            ).build()
+        player.setMediaItem(item)
+        player.setPlaybackParameters(PlaybackParameters(layer.speed))
+        player.volume = if (layer.muted) 0f else layer.volume.coerceIn(0f, 1f)
+        player.prepare()
+    }
+
+    LaunchedEffect(layer.id, isPlaying) {
+        val local = (projectTimeMs - layer.timelineStartMs).coerceAtLeast(0L)
+        player.seekTo((local * layer.speed).toLong().coerceIn(0L, layer.trimmedMs))
+        if (isPlaying) player.play() else player.pause()
+    }
+    LaunchedEffect(projectTimeMs) {
+        if (!isPlaying) {
+            val local = (projectTimeMs - layer.timelineStartMs).coerceAtLeast(0L)
+            player.seekTo((local * layer.speed).toLong().coerceIn(0L, layer.trimmedMs))
+        }
+    }
+
+    AndroidView(
+        factory = { playerView },
+        modifier = Modifier
+            .align(Alignment.Center)
+            .offset(x = canvasW * (layer.x / 2f), y = -canvasH * (layer.y / 2f))
+            .size(
+                width = canvasW * layer.scale.coerceIn(0.05f, 0.95f),
+                height = canvasH * layer.scale.coerceIn(0.05f, 0.95f)
+            )
+            .graphicsLayer {
+                alpha = layer.opacity
+                rotationZ = -layer.rotation
+            }
+            .border(1.dp, Color.White.copy(alpha = 0.65f), RoundedCornerShape(6.dp))
+            .clickable(onClick = onSelect)
+            .zIndex(5f + layer.layerOrder)
+    )
 }
 
 /**
