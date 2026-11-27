@@ -1050,7 +1050,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             track.id to buildTrimmedVoiceGatePoints(wave, track.trimStartMs, track.trimEndMs, track.noiseGateThreshold)
         }.toMap()
         val duckingPoints = audioTracks.filter { it.autoDuck && !it.isVoiceover && !it.muted && (!audioTracks.any { a -> a.solo && !a.muted } || it.solo)}.associate { track ->
-            track.id to buildVoiceDuckingPoints(audioTracks.filter { it.isVoiceover }.map { VoiceoverActivity(it.id, it.offsetMs, it.trimStartMs, it.trimEndMs) }, voiceWaveforms, totalMs, track.offsetMs)
+            track.id to buildVoiceDuckingPoints(audioTracks.filter { it.isVoiceover && !it.muted && (!audioTracks.any { a -> a.solo && !a.muted } || it.solo) }.map { VoiceoverActivity(it.id, it.offsetMs, it.trimStartMs, it.trimEndMs) }, voiceWaveforms, totalMs, track.offsetMs)
         }
         val comp = buildComposition(ctx, clips, Presentation.createForWidthAndHeight(w, h, layout), audioTracks, fps, overlayClips, duckingPoints, noiseGatePoints)
         val out = File(ctx.cacheDir, "export_${System.currentTimeMillis()}.mp4")

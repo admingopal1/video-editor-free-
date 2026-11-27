@@ -320,23 +320,24 @@ class TimelinePlayer(
         val tracks = audioProvider()
         val ids = tracks.map { it.id }.toSet()
         audioPlayers.keys.filter { it !in ids }.forEach { id -> audioPlayers.remove(id)?.release() }
-        val voiceovers = tracks.filter { it.isVoiceover && !it.muted }
+        val soloActive = tracks.any { it.solo && !it.muted }
+        val audibleTracks = tracks.filter { isAudioTrackAudible(it.muted, it.solo, soloActive) }
+        val voiceovers = audibleTracks.filter { it.isVoiceover }
         val voiceWaveforms = voiceovers.mapNotNull { voice -> waveformProvider(voice.uri)?.let { voice.id to it } }.toMap()
-        val cacheKey = tracks.joinToString("|") { "${it.id}:${it.offsetMs}:${it.trimStartMs}:${it.trimEndMs}:${it.isVoiceover}:${it.autoDuck}:${it.noiseGateEnabled}:${it.noiseGateThreshold}:${it.muted}:${waveformProvider(it.uri)?.let { wave -> System.identityHashCode(wave) } ?: 0}" }
+        val cacheKey = tracks.joinToString("|") { "${it.id}:${it.offsetMs}:${it.trimStartMs}:${it.trimEndMs}:${it.isVoiceover}:${it.autoDuck}:${it.noiseGateEnabled}:${it.noiseGateThreshold}:${it.muted}:${it.solo}:${waveformProvider(it.uri)?.let { wave -> System.identityHashCode(wave) } ?: 0}" }
         if (cacheKey != duckingCacheKey) {
             duckingCacheKey = cacheKey
-            duckingCache = tracks.filter { it.autoDuck && !it.isVoiceover }.associate { track ->
+            duckingCache = audibleTracks.filter { it.autoDuck && !it.isVoiceover }.associate { track ->
                 track.id to buildVoiceDuckingPoints(voiceovers.map { VoiceoverActivity(it.id, it.offsetMs, it.trimStartMs, it.trimEndMs) }, voiceWaveforms, totalMs(), track.offsetMs)
             }
         }
         if (cacheKey != gateCacheKey) {
             gateCacheKey = cacheKey
-            gateCache = tracks.filter { it.isVoiceover && it.noiseGateEnabled }.mapNotNull { track ->
+            gateCache = audibleTracks.filter { it.isVoiceover && it.noiseGateEnabled }.mapNotNull { track ->
                 val wave = waveformProvider(track.uri) ?: return@mapNotNull null
                 track.id to buildTrimmedVoiceGatePoints(wave, track.trimStartMs, track.trimEndMs, track.noiseGateThreshold)
             }.toMap()
         }
-        val soloActive = tracks.any { it.solo && !it.muted }
         for (t in tracks) {
             val p = audioPlayers.getOrPut(t.id) {
                 ExoPlayer.Builder(ctx).build().also { ap ->
