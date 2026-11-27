@@ -138,13 +138,13 @@ fun EditorScreen(vm: EditorViewModel) {
         if (clip == null && tool != null && tool != Tool.Audio && tool != Tool.Canvas) tool = null
     }
 
-    var pendingRelinkId by remember { mutableStateOf<Long?>(null) }
+    var pendingRelinkTarget by remember { mutableStateOf<Pair<String, Long>?>(null) }
     val pickRelink = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        val targetId = pendingRelinkId
-        pendingRelinkId = null
-        if (uri != null && targetId != null) {
+        val target = pendingRelinkTarget
+        pendingRelinkTarget = null
+        if (uri != null && target != null) {
             runCatching { ctx.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-            vm.relinkMissingMedia(targetId, uri)
+            vm.relinkMissingMedia(target.first, target.second, uri)
         }
     }
     val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris ->
@@ -241,7 +241,7 @@ fun EditorScreen(vm: EditorViewModel) {
                                     maxLines = 1
                                 )
                                 TextButton(onClick = {
-                                    pendingRelinkId = item.id
+                                    pendingRelinkTarget = item.kind to item.id
                                     val types = when (item.kind) {
                                         "audio" -> arrayOf("audio/*")
                                         "clip", "overlay" -> arrayOf("video/*", "image/*")
