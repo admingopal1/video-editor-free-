@@ -168,6 +168,31 @@ fun audioKeyframeGainAt(points: List<AudioGainPoint>, elapsedMs: Long): Float {
     return (a.gain + (b.gain - a.gain) * fraction).coerceIn(0f, 2f)
 }
 
+/**
+ * Sequential cursor for real-time PCM processing. Audio sample timestamps move forward,
+ * so this avoids a binary search for every sample frame. Points must be sorted by time.
+ */
+class AudioGainEnvelopeCursor(private val points: List<AudioGainPoint>) {
+    private var lowerIndex = 0
+
+    fun gainAt(elapsedMs: Long): Float {
+        if (points.isEmpty() || elapsedMs < points.first().timeMs) return 1f
+        while (lowerIndex < points.lastIndex && elapsedMs >= points[lowerIndex + 1].timeMs) {
+            lowerIndex++
+        }
+        if (lowerIndex >= points.lastIndex) return points.last().gain.coerceIn(0f, 2f)
+        val a = points[lowerIndex]
+        val b = points[lowerIndex + 1]
+        val span = (b.timeMs - a.timeMs).coerceAtLeast(1L)
+        val fraction = (elapsedMs - a.timeMs).toFloat() / span
+        return (a.gain + (b.gain - a.gain) * fraction).coerceIn(0f, 2f)
+    }
+
+    fun reset() {
+        lowerIndex = 0
+    }
+}
+
 data class VoiceoverActivity(val id: Long, val offsetMs: Long, val trimStartMs: Long, val trimEndMs: Long)
 
 /**
