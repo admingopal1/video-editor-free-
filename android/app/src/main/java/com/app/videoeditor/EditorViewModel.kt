@@ -872,6 +872,10 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 audioSourceDurationsMs[key] = result.first
                 waves[key] = result.second
+            } catch (_: Exception) {
+                // Keep the editor usable if a provider URI becomes unreadable or decoding fails.
+                audioSourceDurationsMs[key] = 0L
+                waves[key] = FloatArray(0)
             } finally {
                 waveLoading.remove(key)
             }
