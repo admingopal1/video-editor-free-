@@ -327,7 +327,7 @@ class TimelinePlayer(
             val fadeGain = audioFadeGainAt(elapsedMs, trackDurationMs, t.fadeInMs, t.fadeOutMs)
             val keyframeGain = audioKeyframeGainAt(t.gainPoints, elapsedMs)
             p.volume = (t.volume * fadeGain * keyframeGain).coerceIn(0f, 1f)
-            p.repeatMode = if (t.loop && t.fadeInMs == 0L && t.fadeOutMs == 0L && t.offsetMs == 0L && t.trimEndMs == Long.MAX_VALUE) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
+            p.repeatMode = if (t.loop && t.fadeInMs == 0L && t.fadeOutMs == 0L && t.gainPoints.isEmpty() && t.offsetMs == 0L && t.trimEndMs == Long.MAX_VALUE) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
             val wanted = timeMs - t.offsetMs + t.trimStartMs
             val reachedTrimEnd = t.trimEndMs != Long.MAX_VALUE && wanted >= t.trimEndMs
             if (!isPlaying || timeMs < t.offsetMs || reachedTrimEnd) {
