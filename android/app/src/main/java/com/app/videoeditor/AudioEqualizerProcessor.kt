@@ -25,7 +25,7 @@ class AudioEqualizerProcessor(
     @Volatile
     private var requestedGainsDb: List<Float> = normalizeGains(initialGainsDb)
 
-    private var filtersByChannel: Array<Array<PeakingBiquad>> = emptyArray()
+    @Volatile\n    private var filtersByChannel: Array<Array<PeakingBiquad>> = emptyArray()
 
     /** Safe to call while playback is running; coefficients are refreshed on the audio thread. */
     fun setGainsDb(gainsDb: List<Float>) {
