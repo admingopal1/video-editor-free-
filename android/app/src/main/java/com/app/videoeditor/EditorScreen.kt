@@ -1468,6 +1468,20 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
             Slide("Fade out", t.fadeOutMs / 1000f, 0f..fadeMaxSeconds, String.format(Locale.US, "%.1fs", t.fadeOutMs / 1000f)) { v ->
                 vm.updateAudio(t.id) { it.copy(fadeOutMs = (v * 100f).toLong() * 10L, loop = false) }
             }
+            val orderedAudio = vm.audioTracks.sortedWith(compareBy<AudioTrack> { it.offsetMs }.thenBy { it.id })
+            val hasNextAudio = orderedAudio.indexOfFirst { it.id == t.id } in 0 until orderedAudio.lastIndex
+            if (hasNextAudio) {
+                OutlinedButton(onClick = {
+                    val durations = vm.audioTracks.associate { track ->
+                        track.id to ((vm.waves[track.uri.toString()]?.size ?: 0) * 100L)
+                    }
+                    val updated = configureAudioCrossfade(vm.audioTracks, t.id, durations, 2_000L)
+                    updated.filterIndexed { index, track -> track != vm.audioTracks[index] }
+                        .forEach { changed -> vm.updateAudio(changed.id) { changed } }
+                }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Crossfade into next track · 2s")
+                }
+            }
             if (t.loop && (t.fadeInMs > 0L || t.fadeOutMs > 0L || t.gainPoints.isNotEmpty())) {
                 Text("Looping is disabled while fades or volume automation are active.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
             }

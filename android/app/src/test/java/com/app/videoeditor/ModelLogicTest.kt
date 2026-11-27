@@ -91,6 +91,27 @@ class ModelLogicTest {
     }
 
     @Test
+    fun crossfadeAlignsNextTrackAndSetsMatchingFadeEnvelopes() {
+        val first = AudioTrack(1L, Uri.parse("file:///first.mp3"), "First", offsetMs = 0L)
+        val second = AudioTrack(2L, Uri.parse("file:///second.mp3"), "Second", offsetMs = 9_000L)
+        val result = configureAudioCrossfade(listOf(first, second), 1L, mapOf(1L to 10_000L, 2L to 8_000L), 2_000L)
+        assertEquals(8_000L, result[0].trimEndMs)
+        assertEquals(2_000L, result[0].fadeOutMs)
+        assertEquals(8_000L, result[1].offsetMs)
+        assertEquals(2_000L, result[1].fadeInMs)
+        assertEquals(false, result[0].loop)
+        assertEquals(false, result[1].loop)
+    }
+
+    @Test
+    fun crossfadeDoesNotChangeTracksWithoutKnownDurationsOrNextTrack() {
+        val first = AudioTrack(1L, Uri.parse("file:///first.mp3"), "First")
+        assertEquals(listOf(first), configureAudioCrossfade(listOf(first), 1L, mapOf(1L to 10_000L), 2_000L))
+        val second = AudioTrack(2L, Uri.parse("file:///second.mp3"), "Second", offsetMs = 5_000L)
+        assertEquals(listOf(first, second), configureAudioCrossfade(listOf(first, second), 1L, emptyMap(), 2_000L))
+    }
+
+    @Test
     fun audioFadeEnvelopeRampsInAndOut() {
         assertEquals(0f, audioFadeGainAt(0L, 1_000L, 200L, 300L), 0.0001f)
         assertEquals(0.5f, audioFadeGainAt(100L, 1_000L, 200L, 300L), 0.0001f)

@@ -47,6 +47,37 @@ data class AudioTrack(
 
 fun trimmedDurationMs(startMs: Long, endMs: Long): Long = (endMs - startMs).coerceAtLeast(0L)
 
+/** Applies a two-track crossfade by aligning the next track to the outgoing track's end. */
+fun configureAudioCrossfade(
+    tracks: List<AudioTrack>,
+    outgoingId: Long,
+    sourceDurationsMs: Map<Long, Long>,
+    requestedMs: Long
+): List<AudioTrack> {
+    if (requestedMs <= 0L) return tracks
+    val ordered = tracks.sortedWith(compareBy<AudioTrack> { it.offsetMs }.thenBy { it.id })
+    val index = ordered.indexOfFirst { it.id == outgoingId }
+    if (index < 0 || index >= ordered.lastIndex) return tracks
+    val outgoing = ordered[index]
+    val incoming = ordered[index + 1]
+    val outgoingDuration = sourceDurationsMs[outgoing.id] ?: return tracks
+    val incomingDuration = sourceDurationsMs[incoming.id] ?: return tracks
+    val outgoingEndSource = minOf(outgoing.trimEndMs, outgoingDuration)
+    val outgoingAvailable = (outgoingEndSource - outgoing.trimStartMs).coerceAtLeast(0L)
+    val incomingAvailable = (minOf(incoming.trimEndMs, incomingDuration) - incoming.trimStartMs).coerceAtLeast(0L)
+    val fadeMs = minOf(requestedMs, outgoingAvailable, incomingAvailable)
+    if (fadeMs <= 0L) return tracks
+    val outgoingEndTimeline = outgoing.offsetMs + outgoingAvailable
+    val incomingStart = (outgoingEndTimeline - fadeMs).coerceAtLeast(outgoing.offsetMs)
+    return tracks.map { track ->
+        when (track.id) {
+            outgoing.id -> track.copy(trimEndMs = outgoingEndSource, fadeOutMs = fadeMs, loop = false)
+            incoming.id -> track.copy(offsetMs = incomingStart, fadeInMs = fadeMs, loop = false)
+            else -> track
+        }
+    }
+}
+
 fun normalizedAudioTrimEndMs(trimEndMs: Long?, trimStartMs: Long): Long =
     (trimEndMs ?: Long.MAX_VALUE).coerceAtLeast(trimStartMs + 1L)
 
