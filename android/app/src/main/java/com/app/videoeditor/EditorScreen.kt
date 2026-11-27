@@ -851,7 +851,7 @@ private fun PreviewStage(vm: EditorViewModel, modifier: Modifier, onAdd: () -> U
                 .filter { it.isImage && it.isVisibleAt(vm.timeMs) }
                 .maxByOrNull { it.layerOrder }
             if (activeOverlay != null) {
-                val overlayBitmap by produceState<Bitmap?>(initialValue = vm.overlayBitmap(activeOverlay.uriString), activeOverlay.uriString) {
+                val overlayBitmap by produceState<Bitmap?>(initialValue = null, activeOverlay.uriString) {
                     value = withContext(Dispatchers.IO) { vm.overlayBitmap(activeOverlay.uriString) }
                 }
                 overlayBitmap?.let { imageBitmap ->
