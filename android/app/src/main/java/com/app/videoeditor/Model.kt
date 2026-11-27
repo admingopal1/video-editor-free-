@@ -376,6 +376,18 @@ data class TextLayer(
 
 data class ProjectInfo(val id: String, val name: String, val updated: Long, val clipCount: Int, val durationMs: Long)
 
+/** Rejects corrupt clip metadata before it can poison an otherwise recoverable project. */
+fun Clip.isValidProjectClip(): Boolean =
+    id > 0L &&
+        uri.toString().isNotBlank() &&
+        durationMs > 0L &&
+        width > 0 && height > 0 &&
+        startMs >= 0L && endMs > startMs && endMs <= durationMs &&
+        speed > 0f && speed.isFinite() &&
+        volume >= 0f && volume.isFinite() &&
+        zoom > 0f && zoom.isFinite() &&
+        listOf(cropL, cropR, cropT, cropB, brightness, contrast, saturation, warmth, hue).all { it.isFinite() }
+
 data class Clip(
     val id: Long,
     val uri: Uri,
