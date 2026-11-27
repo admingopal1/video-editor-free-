@@ -318,6 +318,22 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     private val projectSaveMutex = Mutex()
 
+    /** Explicitly accepts a recovered project after missing source media was skipped. */
+    fun saveRecoveredProject() {
+        if (!missingMediaRecoveryPending) return
+        missingMediaRecoveryPending = false
+        viewModelScope.launch {
+            try {
+                saveNow()
+                toast("Recovered project saved. Original backup is retained.")
+            } catch (e: Exception) {
+                // Keep the warning and autosave guard active if the atomic write failed.
+                missingMediaRecoveryPending = true
+                toast(e.message ?: "Could not save the recovered project. Original backup is retained.")
+            }
+        }
+    }
+
     private suspend fun saveNow() {
         // Do not overwrite the original project after dropping inaccessible media without explicit user approval.
         if (missingMediaRecoveryPending) return
