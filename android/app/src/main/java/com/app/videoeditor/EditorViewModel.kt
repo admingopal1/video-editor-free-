@@ -1045,10 +1045,10 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private fun runExport(requestId: Long, voiceWaveforms: Map<Long, FloatArray>) {
         val (w, h) = outputSize()
         val layout = if (fill) Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP else Presentation.LAYOUT_SCALE_TO_FIT
-        val noiseGatePoints = audioTracks.filter { it.isVoiceover && it.noiseGateEnabled }.associate { track ->
-            val wave = voiceWaveforms[track.id] ?: return@associate emptyList()
+        val noiseGatePoints = audioTracks.filter { it.isVoiceover && it.noiseGateEnabled }.mapNotNull { track ->
+            val wave = voiceWaveforms[track.id] ?: return@mapNotNull null
             track.id to buildVoiceGatePoints(wave, wave.size * 100L, track.noiseGateThreshold)
-        }
+        }.toMap()
         val duckingPoints = audioTracks.filter { it.autoDuck && !it.isVoiceover }.associate { track ->
             track.id to buildVoiceDuckingPoints(audioTracks.filter { it.isVoiceover }.map { VoiceoverActivity(it.id, it.offsetMs, it.trimStartMs, it.trimEndMs) }, voiceWaveforms, totalMs, track.offsetMs)
         }
