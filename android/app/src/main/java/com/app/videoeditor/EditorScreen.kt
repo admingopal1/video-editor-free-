@@ -529,6 +529,8 @@ private fun Timeline(
     var expected by remember { mutableIntStateOf(-1) }
     var trimming by remember { mutableStateOf(false) }
     var snapGuideMs by remember { mutableStateOf<Long?>(null) }
+    var lastSnapHapticMs by remember { mutableStateOf<Long?>(null) }
+    val haptics = LocalHapticFeedback.current
 
     val widths = vm.clips.map { maxOf((it.outputMs / 1000f) * dpPerSec, 52f) }
     val starts = ArrayList<Float>().also { l ->
@@ -602,9 +604,9 @@ private fun Timeline(
                                     .background(Brush.horizontalGradient(listOf(Color(0xFF087E8B), Color(0xFF4F46E5))))
                                     .pointerInput(layer.id, dpPerSec) {
                                         detectDragGesturesAfterLongPress(
-                                            onDragStart = { vm.selectedOverlayId = layer.id; snapGuideMs = null },
-                                            onDragEnd = { snapGuideMs = null },
-                                            onDragCancel = { snapGuideMs = null },
+                                            onDragStart = { vm.selectedOverlayId = layer.id; snapGuideMs = null; lastSnapHapticMs = null },
+                                            onDragEnd = { snapGuideMs = null; lastSnapHapticMs = null },
+                                            onDragCancel = { snapGuideMs = null; lastSnapHapticMs = null },
                                             onDrag = { change, dragAmount ->
                                                 change.consume()
                                                 val deltaMs = (dragAmount.x / dpPerSec.coerceAtLeast(1f) * 1000f).toLong()
@@ -643,6 +645,10 @@ private fun Timeline(
                                                                 .toLong().coerceIn(60L, 500L)
                                                         )
                                                         snapGuideMs = snapped.snappedToMs
+                                                        if (snapped.snappedToMs != null && snapped.snappedToMs != lastSnapHapticMs) {
+                                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                        }
+                                                        lastSnapHapticMs = snapped.snappedToMs
                                                         vm.updateOverlay(layer.id) {
                                                             it.copy(timelineStartMs = snapped.positionMs)
                                                         }
