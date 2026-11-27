@@ -367,6 +367,7 @@ fun buildVideoEffects(c: Clip, presentation: Presentation?, forExport: Boolean, 
 
 fun buildAudioProcessors(c: Clip): List<AudioProcessor> {
     val l = mutableListOf<AudioProcessor>()
+    if (!c.isImage && c.audioEqGainsDb.any { it != 0f }) l += AudioEqualizerProcessor(c.audioEqGainsDb)
     if (c.speed != 1f && !c.isImage) l += SonicAudioProcessor().apply { setSpeed(c.speed) }
     if (c.volume != 1f && !c.muted) l += volumeProcessor(c.volume)
     return l
