@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Typeface
+import android.net.Uri
 import android.view.LayoutInflater
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -72,6 +73,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackParameters
+import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.Dispatchers
@@ -149,6 +153,12 @@ fun EditorScreen(vm: EditorViewModel) {
             vm.addOverlayImage(u)
         }
     }
+    val pickOverlayVideo = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
+        if (u != null) {
+            runCatching { ctx.contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            vm.addOverlayVideo(u)
+        }
+    }
     val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { vm.startExport() }
     val micPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) vm.startVoice()
@@ -188,6 +198,9 @@ fun EditorScreen(vm: EditorViewModel) {
             }
             TextButton(onClick = { pickOverlayImage.launch(arrayOf("image/*")) }) {
                 Text("＋ PIP", color = Pal.cyan, fontWeight = FontWeight.SemiBold)
+            }
+            TextButton(onClick = { pickOverlayVideo.launch(arrayOf("video/*")) }) {
+                Text("＋ PIP video", color = Pal.cool, fontWeight = FontWeight.SemiBold)
             }
             GradientButton("Export", onClick = { requestExport() }, enabled = vm.clips.isNotEmpty(), shimmer = vm.clips.isNotEmpty())
         }
@@ -818,8 +831,54 @@ private fun PreviewStage(vm: EditorViewModel, modifier: Modifier, onAdd: () -> U
     val tl = vm.timeline
     val viewA = remember { (LayoutInflater.from(ctx).inflate(R.layout.player_texture, null) as PlayerView).also { it.player = tl.playerA } }
     val viewB = remember { (LayoutInflater.from(ctx).inflate(R.layout.player_texture, null) as PlayerView).also { it.player = tl.playerB } }
+    val pipVideoPlayer = remember { ExoPlayer.Builder(ctx).build() }
+    val pipVideoView = remember {
+        (LayoutInflater.from(ctx).inflate(R.layout.player_texture, null) as PlayerView).also {
+            it.player = pipVideoPlayer
+            it.useController = false
+            it.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+        }
+    }
+    DisposableEffect(pipVideoPlayer) {
+        onDispose { pipVideoPlayer.release() }
+    }
     val current = vm.clips.getOrNull(tl.currentIndex)
     val localOutMs = tl.localOutMs()
+    val activeOverlayVideo = vm.overlayClips
+        .filter { !it.isImage && it.isVisibleAt(vm.timeMs) }
+        .maxByOrNull { it.layerOrder }
+
+    LaunchedEffect(activeOverlayVideo?.id, activeOverlayVideo?.uriString) {
+        val layer = activeOverlayVideo
+        if (layer == null) {
+            pipVideoPlayer.pause()
+            pipVideoPlayer.clearMediaItems()
+        } else {
+            val item = MediaItem.Builder().setUri(Uri.parse(layer.uriString))
+                .setClippingConfiguration(
+                    MediaItem.ClippingConfiguration.Builder()
+                        .setStartPositionMs(layer.startMs)
+                        .setEndPositionMs(layer.endMs)
+                        .build()
+                ).build()
+            pipVideoPlayer.setMediaItem(item)
+            pipVideoPlayer.setPlaybackParameters(PlaybackParameters(layer.speed))
+            pipVideoPlayer.prepare()
+        }
+    }
+    LaunchedEffect(activeOverlayVideo?.id, vm.isPlaying) {
+        val layer = activeOverlayVideo ?: return@LaunchedEffect
+        val local = (vm.timeMs - layer.timelineStartMs).coerceAtLeast(0L)
+        pipVideoPlayer.seekTo((local * layer.speed).toLong().coerceIn(0L, layer.trimmedMs))
+        if (vm.isPlaying) pipVideoPlayer.play() else pipVideoPlayer.pause()
+    }
+    LaunchedEffect(activeOverlayVideo?.id, vm.timeMs) {
+        val layer = activeOverlayVideo ?: return@LaunchedEffect
+        if (!vm.isPlaying) {
+            val local = (vm.timeMs - layer.timelineStartMs).coerceAtLeast(0L)
+            pipVideoPlayer.seekTo((local * layer.speed).toLong().coerceIn(0L, layer.trimmedMs))
+        }
+    }
 
     BoxWithConstraints(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
         val first = vm.clips.firstOrNull()
@@ -868,6 +927,25 @@ private fun PreviewStage(vm: EditorViewModel, modifier: Modifier, onAdd: () -> U
                         contentScale = ContentScale.FillBounds, colorFilter = imageFilter(current)
                     )
                 }
+            }
+            if (activeOverlayVideo != null) {
+                AndroidView(
+                    factory = { pipVideoView },
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .offset(x = canvasW * (activeOverlayVideo.x / 2f), y = -canvasH * (activeOverlayVideo.y / 2f))
+                        .size(
+                            width = canvasW * activeOverlayVideo.scale.coerceIn(0.05f, 0.95f),
+                            height = canvasH * activeOverlayVideo.scale.coerceIn(0.05f, 0.95f)
+                        )
+                        .graphicsLayer {
+                            alpha = activeOverlayVideo.opacity
+                            rotationZ = -activeOverlayVideo.rotation
+                        }
+                        .border(1.dp, Color.White.copy(alpha = 0.65f), RoundedCornerShape(6.dp))
+                        .clickable { vm.selectedOverlayId = activeOverlayVideo.id }
+                        .zIndex(5f)
+                )
             }
             val activeOverlay = vm.overlayClips
                 .filter { it.isImage && it.isVisibleAt(vm.timeMs) }
