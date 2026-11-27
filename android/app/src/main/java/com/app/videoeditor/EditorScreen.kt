@@ -606,9 +606,33 @@ private fun Timeline(
                                                 change.consume()
                                                 val deltaMs = (dragAmount.x / dpPerSec.coerceAtLeast(1f) * 1000f).toLong()
                                                 if (deltaMs != 0L) {
-                                                    val maxStart = (vm.timeline.totalMs() - layer.outputMs).coerceAtLeast(0L)
+                                                    val totalDurationMs = vm.timeline.totalMs().coerceAtLeast(0L)
+                                                    val boundaries = buildList {
+                                                        add(0L)
+                                                        var cursor = 0L
+                                                        vm.clips.forEach { mainClip ->
+                                                            cursor = if (mainClip.outputMs > totalDurationMs - cursor) {
+                                                                totalDurationMs
+                                                            } else {
+                                                                cursor + mainClip.outputMs.coerceAtLeast(0L)
+                                                            }
+                                                            add(cursor)
+                                                        }
+                                                        vm.overlayClips.filter { it.id != layer.id }.forEach { other ->
+                                                            add(other.timelineStartMs.coerceIn(0L, totalDurationMs))
+                                                            add(other.timelineEndMs.coerceIn(0L, totalDurationMs))
+                                                        }
+                                                    }
                                                     vm.updateOverlay(layer.id) {
-                                                        it.copy(timelineStartMs = (it.timelineStartMs + deltaMs).coerceIn(0L, maxStart))
+                                                        val requestedStart = (it.timelineStartMs.toDouble() + deltaMs.toDouble())
+                                                            .coerceIn(0.0, totalDurationMs.toDouble()).toLong()
+                                                        val snapped = snapOverlayTimelineStart(
+                                                            requestedStartMs = requestedStart,
+                                                            durationMs = it.outputMs,
+                                                            totalDurationMs = totalDurationMs,
+                                                            boundariesMs = boundaries
+                                                        )
+                                                        it.copy(timelineStartMs = snapped.positionMs)
                                                     }
                                                 }
                                             }
