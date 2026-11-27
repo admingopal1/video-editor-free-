@@ -418,7 +418,7 @@ fun buildComposition(
             audioItems += EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(makeSilence(ctx, t.offsetMs))))
                 .setRemoveVideo(true).build()
         }
-        val loop = t.loop && t.fadeInMs == 0L && t.fadeOutMs == 0L && t.offsetMs == 0L && !loopUsed
+        val loop = t.loop && t.fadeInMs == 0L && t.fadeOutMs == 0L && t.gainPoints.isEmpty() && t.offsetMs == 0L && !loopUsed
         if (loop) loopUsed = true
         val clipping = MediaItem.ClippingConfiguration.Builder().setStartPositionMs(t.trimStartMs)
         val timelineEnd = t.trimStartMs + (totalMs - t.offsetMs)
