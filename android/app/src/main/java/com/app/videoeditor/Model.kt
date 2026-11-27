@@ -45,7 +45,8 @@ data class AudioTrack(
     val autoDuck: Boolean = false,
     val noiseGateEnabled: Boolean = false,
     val noiseGateThreshold: Float = 0.04f,
-    val muted: Boolean = false
+    val muted: Boolean = false,
+    val solo: Boolean = false
 )
 
 fun trimmedDurationMs(startMs: Long, endMs: Long): Long = (endMs - startMs).coerceAtLeast(0L)
@@ -309,7 +310,7 @@ sealed class ExportState {
 fun Clip.toJson(): JSONObject = JSONObject().apply {
     put("id", id); put("uri", uri.toString()); put("dur", durationMs); put("w", width); put("h", height)
     put("start", startMs); put("end", endMs); put("img", isImage)
-    put("speed", speed.toDouble()); put("vol", volume.toDouble()); put("muted", muted)
+    put("speed", speed.toDouble()); put("vol", volume.toDouble()); put("muted", muted); put("solo", solo)
     put("rot", rotation); put("fh", flipH); put("fv", flipV); put("zoom", zoom.toDouble())
     put("cl", cropL.toDouble()); put("cr", cropR.toDouble()); put("ct", cropT.toDouble()); put("cb", cropB.toDouble())
     put("br", brightness.toDouble()); put("co", contrast.toDouble()); put("sa", saturation.toDouble())
@@ -401,5 +402,6 @@ fun audioFromJson(o: JSONObject): AudioTrack = AudioTrack(
     autoDuck = o.optBoolean("autoDuck", false),
     noiseGateEnabled = o.optBoolean("noiseGate", false),
     noiseGateThreshold = o.optDouble("noiseGateThreshold", 0.04).toFloat().coerceIn(0.001f, 1f),
-    muted = o.optBoolean("muted", false)
+    muted = o.optBoolean("muted", false),
+    solo = o.optBoolean("solo", false)
 )

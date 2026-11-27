@@ -1425,6 +1425,13 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
                 }
                 Switch(checked = t.muted, onCheckedChange = { muted -> vm.updateAudio(t.id) { it.copy(muted = muted) } })
             }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Solo this track", style = MaterialTheme.typography.bodyMedium)
+                    Text(if (t.solo) "Only solo tracks will play" else "Other unmuted tracks remain audible", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+                }
+                Switch(checked = t.solo, onCheckedChange = { solo -> vm.updateAudio(t.id) { it.copy(solo = solo) } })
+            }
             if (!t.isVoiceover) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {

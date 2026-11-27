@@ -6,6 +6,13 @@ import android.net.Uri
 
 class ModelLogicTest {
     @Test
+    fun audioTrackSoloDefaultsOffAndCanBeEnabled() {
+        val track = AudioTrack(id = 11L, uri = android.net.Uri.parse("file:///audio.wav"), name = "Music")
+        assertEquals(false, track.solo)
+        assertEquals(true, track.copy(solo = true).solo)
+    }
+
+    @Test
     fun audioTrackMuteDefaultsOffAndCanBeEnabled() {
         val track = AudioTrack(id = 10L, uri = android.net.Uri.parse("file:///audio.wav"), name = "Voice")
         assertEquals(false, track.muted)

@@ -336,6 +336,7 @@ class TimelinePlayer(
                 track.id to buildTrimmedVoiceGatePoints(wave, track.trimStartMs, track.trimEndMs, track.noiseGateThreshold)
             }.toMap()
         }
+        val soloActive = tracks.any { it.solo && !it.muted }
         for (t in tracks) {
             val p = audioPlayers.getOrPut(t.id) {
                 ExoPlayer.Builder(ctx).build().also { ap ->
@@ -349,7 +350,7 @@ class TimelinePlayer(
             val keyframeGain = audioKeyframeGainAt(t.gainPoints, elapsedMs)
             val duckGain = audioKeyframeGainAt(duckingCache[t.id] ?: emptyList(), elapsedMs)
             val gateGain = audioKeyframeGainAt(gateCache[t.id] ?: emptyList(), elapsedMs)
-            p.volume = if (t.muted) 0f else (t.volume * fadeGain * keyframeGain * duckGain * gateGain).coerceIn(0f, 1f)
+            p.volume = if (t.muted || (soloActive && !t.solo)) 0f else (t.volume * fadeGain * keyframeGain * duckGain * gateGain).coerceIn(0f, 1f)
             p.repeatMode = if (t.loop && t.fadeInMs == 0L && t.fadeOutMs == 0L && t.gainPoints.isEmpty() && !t.autoDuck && !t.noiseGateEnabled && (duckingCache[t.id].isNullOrEmpty()) && (gateCache[t.id].isNullOrEmpty()) && t.offsetMs == 0L && t.trimEndMs == Long.MAX_VALUE) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
             val wanted = timeMs - t.offsetMs + t.trimStartMs
             val reachedTrimEnd = t.trimEndMs != Long.MAX_VALUE && wanted >= t.trimEndMs
