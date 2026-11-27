@@ -90,4 +90,20 @@ class ModelLogicTest {
         assertEquals(8_900L, normalizedAudioTrimEndMs(8_900L, 1_000L))
     }
 
+    @Test
+    fun audioFadeEnvelopeRampsInAndOut() {
+        assertEquals(0f, audioFadeGainAt(0L, 1_000L, 200L, 300L), 0.0001f)
+        assertEquals(0.5f, audioFadeGainAt(100L, 1_000L, 200L, 300L), 0.0001f)
+        assertEquals(1f, audioFadeGainAt(200L, 1_000L, 200L, 300L), 0.0001f)
+        assertEquals(0.5f, audioFadeGainAt(850L, 1_000L, 200L, 300L), 0.0001f)
+        assertEquals(0f, audioFadeGainAt(1_000L, 1_000L, 200L, 300L), 0.0001f)
+    }
+
+    @Test
+    fun audioFadeEnvelopeClampsOutsideTrackDuration() {
+        assertEquals(0f, audioFadeGainAt(-100L, 1_000L, 250L, 250L), 0.0001f)
+        assertEquals(0f, audioFadeGainAt(1_100L, 1_000L, 250L, 250L), 0.0001f)
+        assertEquals(1f, audioFadeGainAt(500L, 1_000L, 0L, 0L), 0.0001f)
+    }
+
 }
