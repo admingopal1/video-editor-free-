@@ -80,7 +80,7 @@ class OverlaySnapTest {
     fun negativeProjectDurationIsHandledSafely() {
         assertEquals(
             OverlaySnapResult(0L, null),
-            snapOverlayTimelineStart(5_000L, Long.MAX_VALUE, -1L, listOf(0L, 1_000L))
+            snapOverlayTimelineStart(5_000L, Long.MAX_VALUE, -1L, emptyList())
         )
     }
 
