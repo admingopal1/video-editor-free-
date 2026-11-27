@@ -131,6 +131,15 @@ class ModelLogicTest {
     }
 
     @Test
+    fun audioTrackOutputDurationMatchesTrimAndProjectBounds() {
+        assertEquals(8_000L, audioTrackOutputDurationMs(2_000L, 20_000L, 5_000L, 15_000L))
+        assertEquals(3_000L, audioTrackOutputDurationMs(2_000L, 5_000L, 0L, 20_000L))
+        assertEquals(0L, audioTrackOutputDurationMs(2_000L, 20_000L, 30_000L, 15_000L))
+        assertEquals(0L, audioTrackOutputDurationMs(2_000L, 1_000L, 0L, 15_000L))
+        assertEquals(8_000L, audioTrackOutputDurationMs(2_000L, Long.MAX_VALUE, 5_000L, 15_000L))
+    }
+
+    @Test
     fun previewAudioGainCombinesFadeAutomationDuckingAndGate() {
         assertEquals(0.1f, combinedPreviewAudioGain(0.8f, 0.5f, 0.5f, 0.5f, 1f, true), 0.0001f)
         assertEquals(0f, combinedPreviewAudioGain(1f, 1f, 1f, 1f, 1f, false), 0.0001f)
