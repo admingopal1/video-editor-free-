@@ -44,7 +44,8 @@ data class AudioTrack(
     val isVoiceover: Boolean = false,
     val autoDuck: Boolean = false,
     val noiseGateEnabled: Boolean = false,
-    val noiseGateThreshold: Float = 0.04f
+    val noiseGateThreshold: Float = 0.04f,
+    val muted: Boolean = false
 )
 
 fun trimmedDurationMs(startMs: Long, endMs: Long): Long = (endMs - startMs).coerceAtLeast(0L)
@@ -385,7 +386,7 @@ fun clipFromJson(o: JSONObject): Clip {
 
 fun AudioTrack.toJson(): JSONObject = JSONObject().apply {
     put("id", id); put("uri", uri.toString()); put("name", name); put("vol", volume.toDouble())
-    put("off", offsetMs); put("trim", trimStartMs); put("trimEnd", trimEndMs); put("loop", loop); put("fadeIn", fadeInMs); put("fadeOut", fadeOutMs); put("gainPoints", JSONArray().apply { gainPoints.forEach { put(JSONObject().put("time", it.timeMs).put("gain", it.gain.toDouble())) } }); put("voiceover", isVoiceover); put("autoDuck", autoDuck); put("noiseGate", noiseGateEnabled); put("noiseGateThreshold", noiseGateThreshold.toDouble())
+    put("off", offsetMs); put("trim", trimStartMs); put("trimEnd", trimEndMs); put("loop", loop); put("fadeIn", fadeInMs); put("fadeOut", fadeOutMs); put("gainPoints", JSONArray().apply { gainPoints.forEach { put(JSONObject().put("time", it.timeMs).put("gain", it.gain.toDouble())) } }); put("voiceover", isVoiceover); put("autoDuck", autoDuck); put("noiseGate", noiseGateEnabled); put("noiseGateThreshold", noiseGateThreshold.toDouble()); put("muted", muted)
 }
 
 fun audioFromJson(o: JSONObject): AudioTrack = AudioTrack(
@@ -399,5 +400,6 @@ fun audioFromJson(o: JSONObject): AudioTrack = AudioTrack(
     isVoiceover = o.optBoolean("voiceover", false),
     autoDuck = o.optBoolean("autoDuck", false),
     noiseGateEnabled = o.optBoolean("noiseGate", false),
-    noiseGateThreshold = o.optDouble("noiseGateThreshold", 0.04).toFloat().coerceIn(0.001f, 1f)
+    noiseGateThreshold = o.optDouble("noiseGateThreshold", 0.04).toFloat().coerceIn(0.001f, 1f),
+    muted = o.optBoolean("muted", false)
 )

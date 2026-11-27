@@ -6,6 +6,13 @@ import android.net.Uri
 
 class ModelLogicTest {
     @Test
+    fun audioTrackMuteDefaultsOffAndCanBeEnabled() {
+        val track = AudioTrack(id = 10L, uri = android.net.Uri.parse("file:///audio.wav"), name = "Voice")
+        assertEquals(false, track.muted)
+        assertEquals(true, track.copy(muted = true).muted)
+    }
+
+    @Test
     fun voiceGateRespectsTrimStartAndEnd() {
         val wave = floatArrayOf(0f, 0f, 0.9f, 0.9f, 0f, 0f)
         val points = buildTrimmedVoiceGatePoints(wave, 200L, 400L, 0.1f)

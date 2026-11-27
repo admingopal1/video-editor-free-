@@ -1418,6 +1418,13 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
                 TextButton(onClick = { vm.removeAudio(t.id) }) { Text("Remove") }
             }
             Slide("Volume", t.volume, 0f..2f, "${(t.volume * 100).toInt()}%") { v -> vm.updateAudio(t.id) { it.copy(volume = v) } }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Mute this track", style = MaterialTheme.typography.bodyMedium)
+                    Text(if (t.muted) "Track excluded from preview and export" else "Track audio is included", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+                }
+                Switch(checked = t.muted, onCheckedChange = { muted -> vm.updateAudio(t.id) { it.copy(muted = muted) } })
+            }
             if (!t.isVoiceover) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {

@@ -414,7 +414,7 @@ fun buildComposition(
     val totalMs = clips.sumOf { it.outputMs }
     var loopUsed = false
     for (t in tracks) {
-        if (t.offsetMs >= totalMs) continue
+        if (t.muted || t.offsetMs >= totalMs) continue
         val audioItems = mutableListOf<EditedMediaItem>()
         if (t.offsetMs > 0L) {
             audioItems += EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(makeSilence(ctx, t.offsetMs))))

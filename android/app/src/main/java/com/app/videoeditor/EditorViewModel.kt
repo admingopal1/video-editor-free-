@@ -1027,7 +1027,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             }
             try {
                 val voiceWaveforms = withContext(Dispatchers.IO) {
-                    audioTracks.filter { it.isVoiceover }.mapNotNull { track ->
+                    audioTracks.filter { it.isVoiceover && !it.muted }.mapNotNull { track ->
                         Waveform.compute(ctx, track.uri)?.let { track.id to it }
                     }.toMap()
                 }
@@ -1045,11 +1045,11 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private fun runExport(requestId: Long, voiceWaveforms: Map<Long, FloatArray>) {
         val (w, h) = outputSize()
         val layout = if (fill) Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP else Presentation.LAYOUT_SCALE_TO_FIT
-        val noiseGatePoints = audioTracks.filter { it.isVoiceover && it.noiseGateEnabled }.mapNotNull { track ->
+        val noiseGatePoints = audioTracks.filter { it.isVoiceover && it.noiseGateEnabled && !it.muted }.mapNotNull { track ->
             val wave = voiceWaveforms[track.id] ?: return@mapNotNull null
             track.id to buildTrimmedVoiceGatePoints(wave, track.trimStartMs, track.trimEndMs, track.noiseGateThreshold)
         }.toMap()
-        val duckingPoints = audioTracks.filter { it.autoDuck && !it.isVoiceover }.associate { track ->
+        val duckingPoints = audioTracks.filter { it.autoDuck && !it.isVoiceover && !it.muted }.associate { track ->
             track.id to buildVoiceDuckingPoints(audioTracks.filter { it.isVoiceover }.map { VoiceoverActivity(it.id, it.offsetMs, it.trimStartMs, it.trimEndMs) }, voiceWaveforms, totalMs, track.offsetMs)
         }
         val comp = buildComposition(ctx, clips, Presentation.createForWidthAndHeight(w, h, layout), audioTracks, fps, overlayClips, duckingPoints, noiseGatePoints)
