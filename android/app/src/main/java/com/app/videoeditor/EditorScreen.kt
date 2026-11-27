@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Typeface
+import android.net.Uri
 import android.view.LayoutInflater
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -18,6 +19,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -72,12 +74,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackParameters
+import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import kotlin.math.roundToLong
 import kotlin.math.abs
 
 enum class Tool(val title: String) {
@@ -133,6 +139,15 @@ fun EditorScreen(vm: EditorViewModel) {
         if (clip == null && tool != null && tool != Tool.Audio && tool != Tool.Canvas) tool = null
     }
 
+    var pendingRelinkTarget by remember { mutableStateOf<Pair<String, Long>?>(null) }
+    val pickRelink = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val target = pendingRelinkTarget
+        pendingRelinkTarget = null
+        if (uri != null && target != null) {
+            runCatching { ctx.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            vm.relinkMissingMedia(target.first, target.second, uri)
+        }
+    }
     val pickMedia = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris ->
         uris.forEach { u -> runCatching { ctx.contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION) } }
         vm.addUris(uris)
@@ -141,6 +156,18 @@ fun EditorScreen(vm: EditorViewModel) {
         if (u != null) {
             runCatching { ctx.contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
             vm.addAudio(u)
+        }
+    }
+    val pickOverlayImage = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
+        if (u != null) {
+            runCatching { ctx.contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            vm.addOverlayImage(u)
+        }
+    }
+    val pickOverlayVideo = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
+        if (u != null) {
+            runCatching { ctx.contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            vm.addOverlayVideo(u)
         }
     }
     val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { vm.startExport() }
@@ -180,7 +207,57 @@ fun EditorScreen(vm: EditorViewModel) {
                     style = MaterialTheme.typography.bodySmall, color = Pal.textLo, maxLines = 1
                 )
             }
+            TextButton(onClick = { pickOverlayImage.launch(arrayOf("image/*")) }) {
+                Text("＋ PIP", color = Pal.cyan, fontWeight = FontWeight.SemiBold)
+            }
+            TextButton(onClick = { pickOverlayVideo.launch(arrayOf("video/*")) }) {
+                Text("＋ PIP video", color = Pal.cyan, fontWeight = FontWeight.SemiBold)
+            }
             GradientButton("Export", onClick = { requestExport() }, enabled = vm.clips.isNotEmpty(), shimmer = vm.clips.isNotEmpty())
+        }
+
+        if (vm.missingMediaRecoveryPending) {
+            Glass(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), shape = RoundedCornerShape(14.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Missing source media", color = Pal.cyan, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "${vm.missingMediaCount} item(s) unavailable. Original project is preserved; saving the recovered version will omit them.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Pal.textLo
+                        )
+                        vm.missingMediaItems.forEach { item ->
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "${item.kind.uppercase(Locale.US)} · ${item.name}",
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Pal.textHi,
+                                    maxLines = 1
+                                )
+                                TextButton(onClick = {
+                                    pendingRelinkTarget = item.kind to item.id
+                                    val types = when (item.kind) {
+                                        "audio" -> arrayOf("audio/*")
+                                        "clip", "overlay" -> arrayOf("video/*", "image/*")
+                                        else -> arrayOf("*/*")
+                                    }
+                                    pickRelink.launch(types)
+                                }) { Text("Relink") }
+                            }
+                        }
+                    }
+                    TextButton(onClick = { vm.saveRecoveredProject() }) {
+                        Text("Save recovered")
+                    }
+                }
+            }
         }
 
         // ---------- live preview of the whole timeline ----------
@@ -239,6 +316,88 @@ fun EditorScreen(vm: EditorViewModel) {
     }
 
     if (showProjects) ProjectsDialog(vm) { showProjects = false }
+
+    vm.overlayClips.firstOrNull { it.id == vm.selectedOverlayId }?.let { layer ->
+        AlertDialog(
+            onDismissRequest = { vm.selectedOverlayId = null },
+            title = { Text((if (layer.isImage) "PIP photo · " else "PIP video · ") + layer.name) },
+            text = {
+                Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                    val orderedLayers = vm.overlayClips.sortedWith(compareBy<OverlayClip> { it.layerOrder }.thenBy { it.id })
+                    val layerIndex = orderedLayers.indexOfFirst { it.id == layer.id }
+                    Text("Layer ${layerIndex + 1} of ${orderedLayers.size} · higher layers appear in front", color = Pal.textLo)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { vm.moveOverlayLayer(layer.id, -1) },
+                            enabled = layerIndex > 0,
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Send backward") }
+                        OutlinedButton(
+                            onClick = { vm.moveOverlayLayer(layer.id, 1) },
+                            enabled = layerIndex in 0 until orderedLayers.lastIndex,
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Bring forward") }
+                    }
+                    Text("Size · ${(layer.scale * 100).toInt()}%")
+                    Slider(value = layer.scale, onValueChange = { v -> vm.updateOverlay(layer.id) { it.copy(scale = v) } }, valueRange = 0.1f..0.8f)
+                    Text("Horizontal · ${(layer.x * 100).toInt()}")
+                    Slider(value = layer.x, onValueChange = { v -> vm.updateOverlay(layer.id) { it.copy(x = v) } }, valueRange = -1f..1f)
+                    Text("Vertical · ${(layer.y * 100).toInt()}")
+                    Slider(value = layer.y, onValueChange = { v -> vm.updateOverlay(layer.id) { it.copy(y = v) } }, valueRange = -1f..1f)
+                    Text("Opacity · ${(layer.opacity * 100).toInt()}%")
+                    Slider(value = layer.opacity, onValueChange = { v -> vm.updateOverlay(layer.id) { it.copy(opacity = v) } }, valueRange = 0f..1f)
+                    Text("Rotation · ${layer.rotation.toInt()}°")
+                    Slider(value = layer.rotation, onValueChange = { v -> vm.updateOverlay(layer.id) { it.copy(rotation = v) } }, valueRange = -180f..180f)
+                    Text("Timeline start · ${fmt(layer.timelineStartMs)}")
+                    val maxStart = (vm.timeline.totalMs() - layer.outputMs).coerceAtLeast(0L)
+                    Slider(
+                        value = layer.timelineStartMs.toFloat(),
+                        onValueChange = { v -> vm.updateOverlay(layer.id) { it.copy(timelineStartMs = v.toLong().coerceIn(0L, maxStart)) } },
+                        valueRange = 0f..maxStart.coerceAtLeast(1L).toFloat()
+                    )
+                    if (!layer.isImage) {
+                        Text("Source in · ${fmt(layer.startMs)}")
+                        Slider(
+                            value = layer.startMs.toFloat(),
+                            onValueChange = { v ->
+                                vm.updateOverlay(layer.id) {
+                                    val start = v.toLong().coerceIn(0L, it.endMs - 500L)
+                                    it.copy(startMs = start)
+                                }
+                            },
+                            valueRange = 0f..(layer.endMs - 500L).coerceAtLeast(0L).toFloat()
+                        )
+                        Text("Source out · ${fmt(layer.endMs)}")
+                        Slider(
+                            value = layer.endMs.toFloat(),
+                            onValueChange = { v ->
+                                vm.updateOverlay(layer.id) {
+                                    it.copy(endMs = v.toLong().coerceIn(it.startMs + 500L, it.durationMs))
+                                }
+                            },
+                            valueRange = (layer.startMs + 500L).coerceAtMost(layer.durationMs).toFloat()..layer.durationMs.toFloat()
+                        )
+                        Text("Speed · ${String.format(Locale.US, "%.2fx", layer.speed)}")
+                        Slider(value = layer.speed, onValueChange = { v -> vm.updateOverlay(layer.id) { it.copy(speed = v) } }, valueRange = 0.25f..2f)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Mute PIP audio", modifier = Modifier.weight(1f))
+                            Switch(checked = layer.muted, onCheckedChange = { v -> vm.updateOverlay(layer.id) { it.copy(muted = v) } })
+                        }
+                        if (!layer.muted) {
+                            Text("PIP volume · ${(layer.volume * 100).toInt()}%")
+                            Slider(value = layer.volume, onValueChange = { v -> vm.updateOverlay(layer.id) { it.copy(volume = v) } }, valueRange = 0f..2f)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.selectedOverlayId = null }) { Text("Done") }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.removeOverlay(layer.id) }) { Text("Remove PIP", color = MaterialTheme.colorScheme.error) }
+            }
+        )
+    }
 
     // ---------- export dialog ----------
     when (val s = vm.export) {
@@ -370,6 +529,9 @@ private fun Timeline(
     val scroll = rememberScrollState()
     var expected by remember { mutableIntStateOf(-1) }
     var trimming by remember { mutableStateOf(false) }
+    var snapGuideMs by remember { mutableStateOf<Long?>(null) }
+    var lastSnapHapticMs by remember { mutableStateOf<Long?>(null) }
+    val haptics = LocalHapticFeedback.current
 
     val widths = vm.clips.map { maxOf((it.outputMs / 1000f) * dpPerSec, 52f) }
     val starts = ArrayList<Float>().also { l ->
@@ -425,39 +587,383 @@ private fun Timeline(
                         contentAlignment = Alignment.Center
                     ) { Ico(Ic.Plus, Color.White, 22.dp) }
                 }
-                // text + sticker track: each layer sits at its own time range inside its clip
-                if (vm.clips.any { it.layers.isNotEmpty() }) {
-                    val rows = vm.clips.maxOf { minOf(it.layers.size, 3) }.coerceAtLeast(1)
-                    Box(Modifier.padding(top = 4.dp).width(totalDp.dp).height((rows * 24).dp)) {
-                        vm.clips.forEachIndexed { i, c ->
-                            c.layers.forEachIndexed { li, l ->
-                                val x = starts[i] + widths[i] * l.startFrac
-                                val w = maxOf(widths[i] * (l.endFrac - l.startFrac), 30f)
-                                Box(
-                                    Modifier.offset(x = x.dp, y = ((li % 3) * 24).dp).width(w.dp).height(22.dp)
-                                        .clip(RoundedCornerShape(8.dp)).background(Brush.horizontalGradient(listOf(Pal.violetDeep, Pal.pink)))
-                                        .clickable { vm.selectClip(c.id); vm.selectedLayerId = l.id; openTool(Tool.Text) }
-                                        .padding(horizontal = 5.dp),
-                                    contentAlignment = Alignment.CenterStart
-                                ) { Text(l.text.take(12), fontSize = 10.sp, maxLines = 1, color = Color.White) }
+                // PIP photo lanes: separate from the primary clip track and existing text/audio lanes.
+                if (vm.overlayClips.isNotEmpty()) {
+                    val pipPlacements = assignOverlayLanes(vm.overlayClips)
+                    val pipLaneById = pipPlacements.associate { it.overlayId to it.lane }
+                    val pipRows = (pipPlacements.maxOfOrNull { it.lane } ?: 0) + 1
+                    Box(Modifier.padding(top = 4.dp).width(totalDp.dp).height((pipRows * 26).dp)) {
+                        vm.overlayClips.forEach { layer ->
+                            val lane = pipLaneById[layer.id] ?: 0
+                            val x = (layer.timelineStartMs / 1000f * dpPerSec).coerceIn(0f, totalDp)
+                            val remainingWidth = (totalDp - x).coerceAtLeast(24f)
+                            val w = (layer.outputMs / 1000f * dpPerSec).coerceAtLeast(36f).coerceAtMost(remainingWidth)
+                            Box(
+                                Modifier.offset(x = x.dp, y = (lane * 26).dp)
+                                    .width(w.dp).height(23.dp)
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(Brush.horizontalGradient(listOf(Color(0xFF087E8B), Color(0xFF4F46E5))))
+                                    .pointerInput(layer.id, dpPerSec) {
+                                        detectDragGesturesAfterLongPress(
+                                            onDragStart = { vm.selectedOverlayId = layer.id; snapGuideMs = null; lastSnapHapticMs = null },
+                                            onDragEnd = { snapGuideMs = null; lastSnapHapticMs = null },
+                                            onDragCancel = { snapGuideMs = null; lastSnapHapticMs = null },
+                                            onDrag = { change, dragAmount ->
+                                                change.consume()
+                                                val deltaMs = (dragAmount.x / dpPerSec.coerceAtLeast(1f) * 1000f).toLong()
+                                                if (deltaMs != 0L) {
+                                                    val totalDurationMs = vm.timeline.totalMs().coerceAtLeast(0L)
+                                                    val boundaries = buildList {
+                                                        add(0L)
+                                                        var cursor = 0L
+                                                        vm.clips.forEach { mainClip ->
+                                                            cursor = if (mainClip.outputMs > totalDurationMs - cursor) {
+                                                                totalDurationMs
+                                                            } else {
+                                                                cursor + mainClip.outputMs.coerceAtLeast(0L)
+                                                            }
+                                                            add(cursor)
+                                                        }
+                                                        vm.overlayClips.filter { it.id != layer.id }.forEach { other ->
+                                                            add(other.timelineStartMs.coerceIn(0L, totalDurationMs))
+                                                            add(other.timelineEndMs.coerceIn(0L, totalDurationMs))
+                                                        }
+                                                    }
+                                                    // Read the latest state on every pointer event. The captured `layer`
+                                                    // belongs to the initial composition and becomes stale during a drag.
+                                                    vm.overlayClips.firstOrNull { it.id == layer.id }?.let { movingLayer ->
+                                                        val requestedStart = calculateOverlayDragPosition(
+                                                            currentStartMs = movingLayer.timelineStartMs,
+                                                            deltaMs = deltaMs,
+                                                            totalDurationMs = totalDurationMs
+                                                        )
+                                                        val snapped = snapOverlayTimelineStart(
+                                                            requestedStartMs = requestedStart,
+                                                            durationMs = movingLayer.outputMs,
+                                                            totalDurationMs = totalDurationMs,
+                                                            boundariesMs = boundaries,
+                                                            thresholdMs = ((8f / dpPerSec.coerceAtLeast(1f)) * 1_000f)
+                                                                .toLong().coerceIn(60L, 500L)
+                                                        )
+                                                        snapGuideMs = snapped.snappedToMs
+                                                        if (snapped.snappedToMs != null && snapped.snappedToMs != lastSnapHapticMs) {
+                                                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                        }
+                                                        lastSnapHapticMs = snapped.snappedToMs
+                                                        vm.updateOverlay(layer.id) {
+                                                            it.copy(timelineStartMs = snapped.positionMs)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        )
+                                    }
+                                    .clickable { vm.selectedOverlayId = layer.id },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    (if (layer.isImage) "▣ PIP photo · " else "▣ PIP video · ") + layer.name,
+                                    Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                                    fontSize = 10.sp,
+                                    maxLines = 1,
+                                    color = Color.White
+                                )
+                                if (!layer.isImage) {
+                                    Box(
+                                        Modifier.align(Alignment.CenterStart)
+                                            .width(9.dp).fillMaxHeight()
+                                            .background(Color(0xCCFFFFFF), RoundedCornerShape(topStart = 7.dp, bottomStart = 7.dp))
+                                            .pointerInput(layer.id, dpPerSec) {
+                                                detectHorizontalDragGestures { change, dragAmount ->
+                                                    change.consume()
+                                                    val deltaMs = (dragAmount / dpPerSec.coerceAtLeast(1f) * 1000f).toLong()
+                                                    if (deltaMs != 0L) vm.updateOverlay(layer.id) {
+                                                        trimOverlayStartByOutputDelta(it, deltaMs)
+                                                    }
+                                                }
+                                            }
+                                    )
+                                    Box(
+                                        Modifier.align(Alignment.CenterEnd)
+                                            .width(9.dp).fillMaxHeight()
+                                            .background(Color(0xCCFFFFFF), RoundedCornerShape(topEnd = 7.dp, bottomEnd = 7.dp))
+                                            .pointerInput(layer.id, dpPerSec) {
+                                                detectHorizontalDragGestures { change, dragAmount ->
+                                                    change.consume()
+                                                    val deltaMs = (dragAmount / dpPerSec.coerceAtLeast(1f) * 1000f).toLong()
+                                                    if (deltaMs != 0L) vm.updateOverlay(layer.id) {
+                                                        trimOverlayEndByOutputDelta(it, deltaMs)
+                                                    }
+                                                }
+                                            }
+                                    )
+                                }
                             }
+                        }
+                        snapGuideMs?.let { guideMs ->
+                            val guideX = (guideMs / 1000f * dpPerSec).coerceIn(0f, totalDp)
+                            Box(
+                                Modifier.offset(x = guideX.dp)
+                                    .width(2.dp)
+                                    .fillMaxHeight()
+                                    .background(Color(0xFFFFD54F))
+                            )
+                        }
+                    }
+                }
+                // Text and sticker layers use overlap-aware lanes across the whole project timeline.
+                val textLayerEntries = buildList {
+                    var clipStartMs = 0L
+                    vm.clips.forEach { clip ->
+                        clip.layers.forEach { layer ->
+                            val startFraction = layer.startFrac.coerceIn(0f, 1f)
+                            val endFraction = layer.endFrac.coerceIn(0f, 1f)
+                            val localStart = (clip.outputMs.toDouble() * startFraction).toLong()
+                            val localEnd = (clip.outputMs.toDouble() * endFraction).toLong()
+                            val startMs = if (Long.MAX_VALUE - clipStartMs < localStart) Long.MAX_VALUE else clipStartMs + localStart
+                            val endMs = if (Long.MAX_VALUE - clipStartMs < localEnd) Long.MAX_VALUE else clipStartMs + localEnd
+                            add(TextLayerTimelineEntry(clip.id, layer.id, startMs, endMs))
+                        }
+                        clipStartMs = if (Long.MAX_VALUE - clipStartMs < clip.outputMs.coerceAtLeast(0L)) {
+                            Long.MAX_VALUE
+                        } else clipStartMs + clip.outputMs.coerceAtLeast(0L)
+                    }
+                }
+                val textLayerPlacements = assignTextLayerLanes(textLayerEntries)
+                val textLayerLaneById = textLayerPlacements.associate { (it.clipId to it.layerId) to it.lane }
+                val textLayerLaneCount = (textLayerPlacements.maxOfOrNull { it.lane } ?: -1) + 1
+                if (textLayerLaneCount > 0) {
+                    Box(Modifier.padding(top = 4.dp).width(totalDp.dp).height((textLayerLaneCount * 24).dp)) {
+                        vm.clips.forEachIndexed { i, c ->
+                            c.layers.forEach { layer ->
+                                val lane = textLayerLaneById[c.id to layer.id] ?: 0
+                                val startFraction = layer.startFrac.coerceIn(0f, 1f)
+                                val endFraction = layer.endFrac.coerceIn(startFraction, 1f)
+                                val x = starts[i] + widths[i] * startFraction
+                                val w = maxOf(widths[i] * (endFraction - startFraction), 30f)
+                                Box(
+                                    Modifier.offset(x = x.dp, y = (lane * 24).dp).width(w.dp).height(22.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Brush.horizontalGradient(listOf(Pal.violetDeep, Pal.pink)))
+                                        .clickable { vm.selectClip(c.id); vm.selectedLayerId = layer.id; openTool(Tool.Text) }
+                                ) {
+                                    Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            Modifier.width(8.dp).fillMaxHeight().background(Pal.cyan)
+                                                .pointerInput(c.id, layer.id, dpPerSec) {
+                                                    detectHorizontalDragGestures(
+                                                        onDragStart = { vm.selectClip(c.id); vm.selectedLayerId = layer.id; vm.beginLayerTimingEdit(); snapGuideMs = null; lastSnapHapticMs = null },
+                                                        onDragEnd = { vm.endLayerTimingEdit(); snapGuideMs = null; lastSnapHapticMs = null; vm.onProjectChanged() },
+                                                        onDragCancel = { vm.endLayerTimingEdit(); snapGuideMs = null; lastSnapHapticMs = null; vm.onProjectChanged() },
+                                                        onHorizontalDrag = { change, dragAmount ->
+                                                            change.consume()
+                                                            val deltaMs = (dragAmount / dpPerSec.coerceAtLeast(1f) * 1_000f).roundToLong()
+                                                            if (deltaMs != 0L) {
+                                                                val clipStartMs = vm.clips.take(i).fold(0L) { acc, item ->
+                                                                    if (Long.MAX_VALUE - acc < item.outputMs.coerceAtLeast(0L)) Long.MAX_VALUE else acc + item.outputMs.coerceAtLeast(0L)
+                                                                }
+                                                                val points = buildList {
+                                                                    add(0L); add(c.outputMs)
+                                                                    if (vm.timeMs >= clipStartMs && vm.timeMs - clipStartMs <= c.outputMs) add(vm.timeMs - clipStartMs)
+                                                                    var cursor = 0L
+                                                                    vm.clips.forEach { item ->
+                                                                        add((cursor - clipStartMs).coerceIn(0L, c.outputMs))
+                                                                        cursor = if (Long.MAX_VALUE - cursor < item.outputMs.coerceAtLeast(0L)) Long.MAX_VALUE else cursor + item.outputMs.coerceAtLeast(0L)
+                                                                    }
+                                                                }.distinct()
+                                                                var snapResult: TextLayerSnapResult? = null
+                                                                vm.updateLayer(layer.id) { current ->
+                                                                    snapResult = snapTextLayerTiming(current, c.outputMs, deltaMs, points,
+                                                                        ((8f / dpPerSec.coerceAtLeast(1f)) * 1_000f).roundToLong().coerceIn(60L, 500L),
+                                                                        TextLayerSnapMode.TRIM_START)
+                                                                    snapResult!!.layer
+                                                                }
+                                                                snapResult?.let { result ->
+                                                                    snapGuideMs = result.snappedToMs?.let { clipStartMs + it }
+                                                                    if (result.snappedToMs != null && result.snappedToMs != lastSnapHapticMs) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                                    lastSnapHapticMs = result.snappedToMs
+                                                                }
+                                                            }
+                                                        }
+                                                    )
+                                                }
+                                        )
+                                        Box(
+                                            Modifier.weight(1f).fillMaxHeight()
+                                                .pointerInput(c.id, layer.id, dpPerSec) {
+                                                    detectHorizontalDragGestures(
+                                                        onDragStart = { vm.selectClip(c.id); vm.selectedLayerId = layer.id; vm.beginLayerTimingEdit(); snapGuideMs = null; lastSnapHapticMs = null },
+                                                        onDragEnd = { vm.endLayerTimingEdit(); snapGuideMs = null; lastSnapHapticMs = null; vm.onProjectChanged() },
+                                                        onDragCancel = { vm.endLayerTimingEdit(); snapGuideMs = null; lastSnapHapticMs = null; vm.onProjectChanged() },
+                                                        onHorizontalDrag = { change, dragAmount ->
+                                                            change.consume()
+                                                            val deltaMs = (dragAmount / dpPerSec.coerceAtLeast(1f) * 1_000f).roundToLong()
+                                                            if (deltaMs != 0L) {
+                                                                val clipStartMs = vm.clips.take(i).fold(0L) { acc, item ->
+                                                                    if (Long.MAX_VALUE - acc < item.outputMs.coerceAtLeast(0L)) Long.MAX_VALUE else acc + item.outputMs.coerceAtLeast(0L)
+                                                                }
+                                                                val points = buildList {
+                                                                    add(0L); add(c.outputMs)
+                                                                    if (vm.timeMs >= clipStartMs && vm.timeMs - clipStartMs <= c.outputMs) add(vm.timeMs - clipStartMs)
+                                                                    var cursor = 0L
+                                                                    vm.clips.forEach { item ->
+                                                                        add((cursor - clipStartMs).coerceIn(0L, c.outputMs))
+                                                                        cursor = if (Long.MAX_VALUE - cursor < item.outputMs.coerceAtLeast(0L)) Long.MAX_VALUE else cursor + item.outputMs.coerceAtLeast(0L)
+                                                                    }
+                                                                }.distinct()
+                                                                var snapResult: TextLayerSnapResult? = null
+                                                                vm.updateLayer(layer.id) { current ->
+                                                                    snapResult = snapTextLayerTiming(current, c.outputMs, deltaMs, points,
+                                                                        ((8f / dpPerSec.coerceAtLeast(1f)) * 1_000f).roundToLong().coerceIn(60L, 500L),
+                                                                        TextLayerSnapMode.MOVE)
+                                                                    snapResult!!.layer
+                                                                }
+                                                                snapResult?.let { result ->
+                                                                    snapGuideMs = result.snappedToMs?.let { clipStartMs + it }
+                                                                    if (result.snappedToMs != null && result.snappedToMs != lastSnapHapticMs) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                                    lastSnapHapticMs = result.snappedToMs
+                                                                }
+                                                            }
+                                                        }
+                                                    )
+                                                },
+                                            contentAlignment = Alignment.CenterStart
+                                        ) {
+                                            Text(layer.text.take(12), fontSize = 10.sp, maxLines = 1, color = Color.White,
+                                                modifier = Modifier.padding(horizontal = 3.dp))
+                                        }
+                                        Box(
+                                            Modifier.width(8.dp).fillMaxHeight().background(Pal.cyan)
+                                                .pointerInput(c.id, layer.id, dpPerSec) {
+                                                    detectHorizontalDragGestures(
+                                                        onDragStart = { vm.selectClip(c.id); vm.selectedLayerId = layer.id; vm.beginLayerTimingEdit(); snapGuideMs = null; lastSnapHapticMs = null },
+                                                        onDragEnd = { vm.endLayerTimingEdit(); snapGuideMs = null; lastSnapHapticMs = null; vm.onProjectChanged() },
+                                                        onDragCancel = { vm.endLayerTimingEdit(); snapGuideMs = null; lastSnapHapticMs = null; vm.onProjectChanged() },
+                                                        onHorizontalDrag = { change, dragAmount ->
+                                                            change.consume()
+                                                            val deltaMs = (dragAmount / dpPerSec.coerceAtLeast(1f) * 1_000f).roundToLong()
+                                                            if (deltaMs != 0L) {
+                                                                val clipStartMs = vm.clips.take(i).fold(0L) { acc, item ->
+                                                                    if (Long.MAX_VALUE - acc < item.outputMs.coerceAtLeast(0L)) Long.MAX_VALUE else acc + item.outputMs.coerceAtLeast(0L)
+                                                                }
+                                                                val points = buildList {
+                                                                    add(0L); add(c.outputMs)
+                                                                    if (vm.timeMs >= clipStartMs && vm.timeMs - clipStartMs <= c.outputMs) add(vm.timeMs - clipStartMs)
+                                                                    var cursor = 0L
+                                                                    vm.clips.forEach { item ->
+                                                                        add((cursor - clipStartMs).coerceIn(0L, c.outputMs))
+                                                                        cursor = if (Long.MAX_VALUE - cursor < item.outputMs.coerceAtLeast(0L)) Long.MAX_VALUE else cursor + item.outputMs.coerceAtLeast(0L)
+                                                                    }
+                                                                }.distinct()
+                                                                var snapResult: TextLayerSnapResult? = null
+                                                                vm.updateLayer(layer.id) { current ->
+                                                                    snapResult = snapTextLayerTiming(current, c.outputMs, deltaMs, points,
+                                                                        ((8f / dpPerSec.coerceAtLeast(1f)) * 1_000f).roundToLong().coerceIn(60L, 500L),
+                                                                        TextLayerSnapMode.TRIM_END)
+                                                                    snapResult!!.layer
+                                                                }
+                                                                snapResult?.let { result ->
+                                                                    snapGuideMs = result.snappedToMs?.let { clipStartMs + it }
+                                                                    if (result.snappedToMs != null && result.snappedToMs != lastSnapHapticMs) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                                    lastSnapHapticMs = result.snappedToMs
+                                                                }
+                                                            }
+                                                        }
+                                                    )
+                                                }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        snapGuideMs?.let { guideMs ->
+                            val guideX = (guideMs / 1000f * dpPerSec).coerceIn(0f, totalDp)
+                            Box(Modifier.offset(x = guideX.dp).width(2.dp).fillMaxHeight().background(Color(0xFFFFD54F)))
                         }
                     }
                 }
                 // audio tracks (waveform lanes)
-                vm.audioTracks.forEach { t ->
+    vm.audioTracks.forEach { t ->
                     val wave = vm.waves[t.uri.toString()]
                     val x = minOf(t.offsetMs / 1000f * dpPerSec, maxOf(totalDp - 40f, 0f))
                     val left = maxOf(totalDp - x, 40f)
-                    val len = if (wave != null && wave.isNotEmpty()) (wave.size * 0.1f - t.trimStartMs / 1000f) * dpPerSec else left
+                    val sourceEndSec = if (t.trimEndMs == Long.MAX_VALUE) (wave?.size ?: 0) * 0.1f else t.trimEndMs / 1000f
+                    val len = if (wave != null && wave.isNotEmpty()) (sourceEndSec - t.trimStartMs / 1000f).coerceAtLeast(0.1f) * dpPerSec else left
                     val w = maxOf(if (t.loop && t.offsetMs == 0L) left else minOf(len, left), 40f)
                     Box(
-                        Modifier.padding(top = 4.dp).offset(x = x.dp).width(w.dp).height(26.dp).clip(RoundedCornerShape(8.dp))
-                            .background(Brush.horizontalGradient(listOf(Color(0xFF0F9D75), Pal.cyan))).clickable { openTool(Tool.Audio) },
+                        Modifier.padding(top = 4.dp).offset(x = x.dp).width(w.dp).height(if (t.gainPoints.isEmpty()) 26.dp else 54.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Brush.horizontalGradient(listOf(Color(0xFF0F9D75), Pal.cyan)))
+                            .clickable { openTool(Tool.Audio) },
                         contentAlignment = Alignment.CenterStart
                     ) {
-                        WaveBars(wave, t.trimStartMs, t.trimStartMs + (w / dpPerSec * 1000f).toLong(), Color(0x99FFFFFF), Modifier.fillMaxSize())
-                        Text(" ♪ ${t.name.take(22)}", fontSize = 10.sp, maxLines = 1, color = Color.White)
+                        WaveBars(wave, t.trimStartMs, t.trimStartMs + (w / dpPerSec * 1000f).toLong(), Color(0x66FFFFFF), Modifier.fillMaxSize())
+                        if (t.gainPoints.isNotEmpty()) {
+                            Canvas(
+                                Modifier.fillMaxSize().pointerInput(t.id, w, dpPerSec) {
+                                    var selectedIndex = -1
+                                    detectDragGestures(
+                                        onDragStart = { point ->
+                                            val points = t.gainPoints
+                                            selectedIndex = points.indices.minByOrNull { i ->
+                                                val px = points[i].timeMs.toFloat() / (w / dpPerSec * 1000f).coerceAtLeast(1f) * size.width
+                                                val py = (1f - points[i].gain.coerceIn(0f, 2f) / 2f) * size.height
+                                                (px - point.x) * (px - point.x) + (py - point.y) * (py - point.y)
+                                            } ?: -1
+                                            if (selectedIndex >= 0) {
+                                                vm.beginAudioAutomationDrag()
+                                                val p = points[selectedIndex]
+                                                val px = p.timeMs.toFloat() / (w / dpPerSec * 1000f).coerceAtLeast(1f) * size.width
+                                                val py = (1f - p.gain.coerceIn(0f, 2f) / 2f) * size.height
+                                                if (kotlin.math.hypot((px - point.x).toDouble(), (py - point.y).toDouble()) > 36.0) selectedIndex = -1
+                                            }
+                                        },
+                                        onDrag = { change, _ ->
+                                            change.consume()
+                                            val index = selectedIndex
+                                            if (index >= 0) {
+                                                val durationMs = (w / dpPerSec * 1000f).toLong().coerceAtLeast(1L)
+                                                val targetTime = (change.position.x / size.width.toFloat().coerceAtLeast(1f) * durationMs).toLong().coerceAtLeast(0L)
+                                                val targetGain = (2f * (1f - change.position.y / size.height.toFloat().coerceAtLeast(1f))).coerceIn(0f, 2f)
+                                                vm.updateAudioAutomationDuringDrag(t.id) { track ->
+                                                    val pts = track.gainPoints
+                                                    if (index !in pts.indices) track else {
+                                                        val lower = if (index > 0) pts[index - 1].timeMs + 1L else 0L
+                                                        val upper = if (index < pts.lastIndex) (pts[index + 1].timeMs - 1L).coerceAtLeast(lower) else durationMs
+                                                        val movedTime = targetTime.coerceIn(lower, upper.coerceAtLeast(lower))
+                                                        track.copy(
+                                                            gainPoints = pts.mapIndexed { i, old ->
+                                                                if (i == index) old.copy(timeMs = movedTime, gain = targetGain) else old
+                                                            }
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        onDragEnd = { selectedIndex = -1 },
+                                        onDragCancel = { selectedIndex = -1 }
+                                    )
+                                }
+                            ) {
+                                val durationMs = (w / dpPerSec * 1000f).toLong().coerceAtLeast(1L)
+                                val points = t.gainPoints
+                                val path = androidx.compose.ui.graphics.Path()
+                                points.forEachIndexed { index, point ->
+                                    val px = (point.timeMs.toFloat() / durationMs).coerceIn(0f, 1f) * size.width
+                                    val py = (1f - point.gain.coerceIn(0f, 2f) / 2f) * size.height
+                                    if (index == 0) path.moveTo(px, py) else path.lineTo(px, py)
+                                }
+                                if (points.size > 1) drawPath(path, Color(0xFFFFE082), style = Stroke(width = 3.dp.toPx()))
+                                points.forEach { point ->
+                                    val px = (point.timeMs.toFloat() / durationMs).coerceIn(0f, 1f) * size.width
+                                    val py = (1f - point.gain.coerceIn(0f, 2f) / 2f) * size.height
+                                    drawCircle(Color(0xFFFFE082), radius = 6.dp.toPx(), center = Offset(px, py))
+                                    drawCircle(Color(0xFF332600), radius = 2.dp.toPx(), center = Offset(px, py))
+                                }
+                            }
+                        }
+                        Text(" ♪ ${t.name.take(22)}", fontSize = 10.sp, maxLines = 1, color = Color.White,
+                            modifier = Modifier.align(Alignment.TopStart).padding(start = 6.dp, top = 2.dp))
                     }
                 }
             }
@@ -681,6 +1187,36 @@ private fun ToolPanel(
                 Switch(checked = c.muted, onCheckedChange = { m -> vm.update(id) { it.copy(muted = m) } })
             }
             Slide("Volume", c.volume, 0f..2f, "${(c.volume * 100).toInt()}%") { v -> vm.update(id) { it.copy(volume = v) } }
+            Text("Original audio fades", fontWeight = FontWeight.SemiBold)
+            Slide("Audio fade in", c.audioFadeInMs.toFloat(), 0f..5000f, "${c.audioFadeInMs} ms") { v ->
+                vm.update(id) { it.copy(audioFadeInMs = v.toLong().coerceIn(0L, 5000L)) }
+            }
+            Slide("Audio fade out", c.audioFadeOutMs.toFloat(), 0f..5000f, "${c.audioFadeOutMs} ms") { v ->
+                vm.update(id) { it.copy(audioFadeOutMs = v.toLong().coerceIn(0L, 5000L)) }
+            }
+            Text("Fades affect the clip's embedded audio, independently of its visual fade.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            Text("Original clip audio EQ", fontWeight = FontWeight.SemiBold)
+            Text("Adjusts sound embedded in this video clip; independent of music tracks.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                listOf("Flat", "Bass Boost", "Vocal").forEach { preset ->
+                    TextButton(onClick = { vm.update(id) { it.copy(audioEqGainsDb = AudioEqualizerProcessor.presetGains(preset)) } }) { Text(preset) }
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                listOf("Podcast", "Treble").forEach { preset ->
+                    TextButton(onClick = { vm.update(id) { it.copy(audioEqGainsDb = AudioEqualizerProcessor.presetGains(preset)) } }) { Text(preset) }
+                }
+            }
+            listOf("60 Hz · Bass", "230 Hz · Low mids", "910 Hz · Midrange", "3.6 kHz · Presence", "14 kHz · Treble").forEachIndexed { band, label ->
+                val gain = c.audioEqGainsDb.getOrNull(band) ?: 0f
+                Slide(label, gain, -12f..12f, String.format(Locale.US, "%+.1f dB", gain)) { value ->
+                    vm.update(id) { clip ->
+                        val gains = AudioEqualizerProcessor.normalizeGains(clip.audioEqGainsDb).toMutableList()
+                        gains[band] = value.coerceIn(-12f, 12f)
+                        clip.copy(audioEqGainsDb = gains)
+                    }
+                }
+            }
         }
         Tool.Animate -> {
             Text("Motion for this clip (great for photos). Shows in the exported video.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
@@ -762,6 +1298,9 @@ private fun PreviewStage(vm: EditorViewModel, modifier: Modifier, onAdd: () -> U
     val viewB = remember { (LayoutInflater.from(ctx).inflate(R.layout.player_texture, null) as PlayerView).also { it.player = tl.playerB } }
     val current = vm.clips.getOrNull(tl.currentIndex)
     val localOutMs = tl.localOutMs()
+    val activeOverlayVideos = vm.overlayClips
+        .filter { !it.isImage && it.isVisibleAt(vm.timeMs) }
+        .sortedBy { it.layerOrder }
 
     BoxWithConstraints(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), contentAlignment = Alignment.Center) {
         val first = vm.clips.firstOrNull()
@@ -811,6 +1350,52 @@ private fun PreviewStage(vm: EditorViewModel, modifier: Modifier, onAdd: () -> U
                     )
                 }
             }
+            // Each active video PIP owns an independent decoder/player, so overlapping layers
+            // remain visible together and retain their own trim, speed, transform and audio settings.
+            activeOverlayVideos.forEach { videoLayer ->
+                key(videoLayer.id) {
+                    PipVideoPreviewLayer(
+                        layer = videoLayer,
+                        projectTimeMs = vm.timeMs,
+                        isPlaying = vm.isPlaying,
+                        canvasW = canvasW,
+                        canvasH = canvasH,
+                        onSelect = { vm.selectedOverlayId = videoLayer.id }
+                    )
+                }
+            }
+            // Render every active photo PIP layer in layer order, not only the topmost one.
+            vm.overlayClips
+                .filter { it.isImage && it.isVisibleAt(vm.timeMs) }
+                .sortedBy { it.layerOrder }
+                .forEach { photoLayer ->
+                    key(photoLayer.id) {
+                        val overlayBitmap by produceState<Bitmap?>(initialValue = null, photoLayer.uriString) {
+                            value = withContext(Dispatchers.IO) { vm.overlayBitmap(photoLayer.uriString) }
+                        }
+                        overlayBitmap?.let { imageBitmap ->
+                            Image(
+                                bitmap = imageBitmap.asImageBitmap(),
+                                contentDescription = photoLayer.name,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .offset(x = canvasW * (photoLayer.x / 2f), y = -canvasH * (photoLayer.y / 2f))
+                                    .size(
+                                        width = canvasW * photoLayer.scale.coerceIn(0.05f, 0.95f),
+                                        height = canvasH * photoLayer.scale.coerceIn(0.05f, 0.95f)
+                                    )
+                                    .graphicsLayer {
+                                        alpha = photoLayer.opacity
+                                        rotationZ = -photoLayer.rotation
+                                    }
+                                    .border(1.dp, Color.White.copy(alpha = 0.65f), RoundedCornerShape(6.dp))
+                                    .clickable { vm.selectedOverlayId = photoLayer.id }
+                                    .zIndex(5f + photoLayer.layerOrder)
+                            )
+                        }
+                    }
+                }
             if (current != null) PreviewTextOverlays(current, localOutMs, canvasW, canvasH, vm.outputWidthPx())
 
             if (vm.clips.isEmpty()) {
@@ -843,6 +1428,81 @@ private fun PreviewStage(vm: EditorViewModel, modifier: Modifier, onAdd: () -> U
                 )
             }
         }
+    }
+}
+
+/**
+ * A separately clocked Media3 player for one PIP video layer. Keeping this as a keyed
+ * composable gives every overlapping layer its own decoder and guarantees release when
+ * the playhead leaves that layer's visible interval.
+ */
+@Composable
+private fun PipVideoPreviewLayer(
+    layer: OverlayClip,
+    projectTimeMs: Long,
+    isPlaying: Boolean,
+    canvasW: Dp,
+    canvasH: Dp,
+    onSelect: () -> Unit
+) {
+    val ctx = LocalContext.current
+    val player = remember(layer.id) { ExoPlayer.Builder(ctx).build() }
+    val playerView = remember(player) {
+        (LayoutInflater.from(ctx).inflate(R.layout.player_texture, null) as PlayerView).also {
+            it.player = player
+            it.useController = false
+            it.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+        }
+    }
+
+    DisposableEffect(player) {
+        onDispose { player.release() }
+    }
+
+    LaunchedEffect(layer.uriString, layer.startMs, layer.endMs, layer.speed, layer.muted, layer.volume) {
+        val item = MediaItem.Builder().setUri(Uri.parse(layer.uriString))
+            .setClippingConfiguration(
+                MediaItem.ClippingConfiguration.Builder()
+                    .setStartPositionMs(layer.startMs)
+                    .setEndPositionMs(layer.endMs)
+                    .build()
+            ).build()
+        player.setMediaItem(item)
+        player.setPlaybackParameters(PlaybackParameters(layer.speed))
+        player.volume = if (layer.muted) 0f else layer.volume.coerceIn(0f, 1f)
+        player.prepare()
+    }
+
+    LaunchedEffect(layer.id, isPlaying) {
+        val local = (projectTimeMs - layer.timelineStartMs).coerceAtLeast(0L)
+        player.seekTo((local * layer.speed).toLong().coerceIn(0L, layer.trimmedMs))
+        if (isPlaying) player.play() else player.pause()
+    }
+    LaunchedEffect(projectTimeMs) {
+        if (!isPlaying) {
+            val local = (projectTimeMs - layer.timelineStartMs).coerceAtLeast(0L)
+            player.seekTo((local * layer.speed).toLong().coerceIn(0L, layer.trimmedMs))
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        AndroidView(
+            factory = { playerView },
+            modifier = Modifier
+                .align(Alignment.Center)
+                .offset(x = canvasW * (layer.x / 2f), y = -canvasH * (layer.y / 2f))
+                .size(
+                    width = canvasW * layer.scale.coerceIn(0.05f, 0.95f),
+                    height = canvasH * layer.scale.coerceIn(0.05f, 0.95f)
+                )
+                .graphicsLayer {
+                    alpha = layer.opacity
+                    rotationZ = -layer.rotation
+                }
+                .border(1.dp, Color.White.copy(alpha = 0.65f), RoundedCornerShape(6.dp))
+                .clickable(onClick = onSelect)
+                .zIndex(5f + layer.layerOrder)
+        )
     }
 }
 
@@ -1130,6 +1790,8 @@ private fun KeyframePanel(vm: EditorViewModel, c: Clip, pos: Long, sel: Int, onS
 
 @Composable
 private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () -> Unit) {
+    var audioRenameId by remember { mutableStateOf<Long?>(null) }
+    var audioRenameValue by remember { mutableStateOf("") }
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         Button(onClick = pickAudio) { Text("＋ Music / sound") }
         Button(
@@ -1149,9 +1811,51 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("♪ ${t.name}", Modifier.weight(1f), maxLines = 1)
+                TextButton(onClick = { audioRenameId = t.id; audioRenameValue = t.name }) { Text("Rename") }
+                val audioIndex = vm.audioTracks.indexOfFirst { it.id == t.id }
+                TextButton(onClick = { vm.moveAudioTrack(t.id, -1) }, enabled = audioIndex > 0) { Text("↑") }
+                TextButton(onClick = { vm.moveAudioTrack(t.id, 1) }, enabled = audioIndex in 0 until vm.audioTracks.lastIndex) { Text("↓") }
+                TextButton(onClick = { vm.duplicateAudio(t.id) }, enabled = vm.audioTracks.size < 4) { Text("Duplicate") }
                 TextButton(onClick = { vm.removeAudio(t.id) }) { Text("Remove") }
             }
             Slide("Volume", t.volume, 0f..2f, "${(t.volume * 100).toInt()}%") { v -> vm.updateAudio(t.id) { it.copy(volume = v) } }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Mute this track", style = MaterialTheme.typography.bodyMedium)
+                    Text(if (t.muted) "Track excluded from preview and export" else "Track audio is included", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+                }
+                Switch(checked = t.muted, onCheckedChange = { muted -> vm.updateAudio(t.id) { it.copy(muted = muted) } })
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Solo this track", style = MaterialTheme.typography.bodyMedium)
+                    Text(if (t.solo) "Only solo tracks will play" else "Other unmuted tracks remain audible", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+                }
+                Switch(checked = t.solo, onCheckedChange = { solo -> vm.updateAudio(t.id) { it.copy(solo = solo) } })
+            }
+            if (!t.isVoiceover) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Auto duck under voice-over", style = MaterialTheme.typography.bodyMedium)
+                        Text("Lowers this track while recorded narration is active.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+                    }
+                    Switch(checked = t.autoDuck, onCheckedChange = { enabled -> vm.updateAudio(t.id) { it.copy(autoDuck = enabled, loop = if (enabled) false else it.loop) } })
+                }
+            } else {
+                Text("🎙 Voice-over track", style = MaterialTheme.typography.labelMedium, color = Pal.textLo)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Basic noise gate", style = MaterialTheme.typography.bodyMedium)
+                        Text("Reduces quiet noise between phrases; does not remove noise under speech.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+                    }
+                    Switch(checked = t.noiseGateEnabled, onCheckedChange = { enabled -> vm.updateAudio(t.id) { it.copy(noiseGateEnabled = enabled, loop = false) } })
+                }
+                if (t.noiseGateEnabled) {
+                    Slide("Gate sensitivity", t.noiseGateThreshold, 0.01f..0.25f, String.format(Locale.US, "%.2f", t.noiseGateThreshold)) { value ->
+                        vm.updateAudio(t.id) { it.copy(noiseGateThreshold = value.coerceIn(0.01f, 0.25f), loop = false) }
+                    }
+                }
+            }
             Slide("Starts at", t.offsetMs / 1000f, 0f..total, String.format(Locale.US, "%.1fs", t.offsetMs / 1000f)) { v ->
                 vm.updateAudio(t.id) { it.copy(offsetMs = (v * 10).toLong() * 100L) }
             }
@@ -1159,17 +1863,127 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
                 Slide("Skip first", t.trimStartMs / 1000f, 0f..(dur - 1f), String.format(Locale.US, "%.1fs", t.trimStartMs / 1000f)) { v ->
                     vm.updateAudio(t.id) { it.copy(trimStartMs = (v * 10).toLong() * 100L) }
                 }
+                val endSeconds = if (t.trimEndMs == Long.MAX_VALUE) dur else (t.trimEndMs / 1000f).coerceIn(t.trimStartMs / 1000f + 0.1f, dur)
+                Slide("Trim end", endSeconds, (t.trimStartMs / 1000f + 0.1f)..dur, String.format(Locale.US, "%.1fs", endSeconds)) { v ->
+                    vm.updateAudio(t.id) { it.copy(trimEndMs = (v * 10).toLong() * 100L, loop = false) }
+                }
+            }
+            Text("5-band equalizer", fontWeight = FontWeight.SemiBold)
+            Text("Per-track PCM EQ · ±12 dB · same filter in preview and export", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                listOf("Flat", "Bass Boost", "Vocal").forEach { preset ->
+                    TextButton(onClick = {
+                        vm.updateAudio(t.id) { it.copy(eqGainsDb = AudioEqualizerProcessor.presetGains(preset), loop = false) }
+                    }) { Text(preset) }
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                listOf("Podcast", "Treble").forEach { preset ->
+                    TextButton(onClick = {
+                        vm.updateAudio(t.id) { it.copy(eqGainsDb = AudioEqualizerProcessor.presetGains(preset), loop = false) }
+                    }) { Text(preset) }
+                }
+            }
+            listOf("60 Hz · Bass", "230 Hz · Low mids", "910 Hz · Midrange", "3.6 kHz · Presence", "14 kHz · Treble").forEachIndexed { band, label ->
+                val gain = t.eqGainsDb.getOrNull(band) ?: 0f
+                Slide(label, gain, -12f..12f, String.format(Locale.US, "%+.1f dB", gain)) { value ->
+                    vm.updateAudio(t.id) { track ->
+                        val gains = AudioEqualizerProcessor.normalizeGains(track.eqGainsDb).toMutableList()
+                        gains[band] = value.coerceIn(-12f, 12f)
+                        track.copy(eqGainsDb = gains, loop = if (gains.any { it != 0f }) false else track.loop)
+                    }
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Volume automation", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                TextButton(onClick = {
+                    val pointTime = (vm.timeline.timeMs - t.offsetMs).coerceAtLeast(0L)
+                    vm.updateAudio(t.id) { track ->
+                        val point = AudioGainPoint(pointTime, track.volume.coerceIn(0f, 2f))
+                        track.copy(gainPoints = (track.gainPoints.filter { kotlin.math.abs(it.timeMs - pointTime) > 50L } + point).sortedBy { it.timeMs }, loop = false)
+                    }
+                }) { Text("＋ Add point here") }
+            }
+            t.gainPoints.forEachIndexed { index, point ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(String.format(Locale.US, "%.1fs", point.timeMs / 1000f), Modifier.width(42.dp), style = MaterialTheme.typography.labelSmall)
+                    TextButton(
+                        onClick = {
+                            vm.updateAudio(t.id) { track ->
+                                track.copy(gainPoints = moveAudioGainPoint(track.gainPoints, index, -100L))
+                            }
+                        },
+                        enabled = point.timeMs > 0L
+                    ) { Text("−0.1") }
+                    Slider(value = point.gain.coerceIn(0f, 2f), onValueChange = { value ->
+                        vm.updateAudio(t.id) { track -> track.copy(gainPoints = track.gainPoints.mapIndexed { i, old -> if (i == index) old.copy(gain = value) else old }) }
+                    }, valueRange = 0f..2f, modifier = Modifier.weight(1f))
+                    TextButton(
+                        onClick = {
+                            vm.updateAudio(t.id) { track ->
+                                track.copy(gainPoints = moveAudioGainPoint(track.gainPoints, index, 100L))
+                            }
+                        }
+                    ) { Text("+0.1") }
+                    TextButton(onClick = { vm.updateAudio(t.id) { track -> track.copy(gainPoints = track.gainPoints.filterIndexed { i, _ -> i != index }) } }) { Text("Remove") }
+                }
+            }
+            if (t.gainPoints.isNotEmpty()) Text("Gain points are interpolated between timeline positions in preview and export.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            val fadeMaxSeconds = (if (dur > 0f) minOf(dur / 2f, 10f) else 10f).coerceAtLeast(0.1f)
+            Slide("Fade in", t.fadeInMs / 1000f, 0f..fadeMaxSeconds, String.format(Locale.US, "%.1fs", t.fadeInMs / 1000f)) { v ->
+                vm.updateAudio(t.id) { it.copy(fadeInMs = (v * 100f).toLong() * 10L, loop = false) }
+            }
+            Slide("Fade out", t.fadeOutMs / 1000f, 0f..fadeMaxSeconds, String.format(Locale.US, "%.1fs", t.fadeOutMs / 1000f)) { v ->
+                vm.updateAudio(t.id) { it.copy(fadeOutMs = (v * 100f).toLong() * 10L, loop = false) }
+            }
+            val orderedAudio = vm.audioTracks.sortedWith(compareBy<AudioTrack> { it.offsetMs }.thenBy { it.id })
+            val orderedIndex = orderedAudio.indexOfFirst { it.id == t.id }
+            val hasNextAudio = orderedIndex in 0 until orderedAudio.lastIndex
+            if (hasNextAudio) {
+                var crossfadeDurationSeconds by remember(t.id) { mutableFloatStateOf(2f) }
+                Slide("Crossfade duration", crossfadeDurationSeconds, 0.5f..5f, String.format(Locale.US, "%.1fs", crossfadeDurationSeconds)) { value ->
+                    crossfadeDurationSeconds = value
+                }
+                val nextTrack = orderedAudio[orderedIndex + 1]
+                val outgoingDurationMs = vm.audioSourceDurationsMs[t.uri.toString()] ?: 0L
+                val incomingDurationMs = vm.audioSourceDurationsMs[nextTrack.uri.toString()] ?: 0L
+                val canCrossfade = outgoingDurationMs > t.trimStartMs && incomingDurationMs > nextTrack.trimStartMs
+                OutlinedButton(onClick = {
+                    val durations = vm.audioTracks.associate { track ->
+                        track.id to (vm.audioSourceDurationsMs[track.uri.toString()] ?: 0L)
+                    }
+                    val states = vm.audioTracks.map { track ->
+                        AudioCrossfadeState(track.id, track.offsetMs, track.trimStartMs, track.trimEndMs, track.fadeInMs, track.fadeOutMs, track.loop)
+                    }
+                    val updated = configureAudioCrossfade(states, t.id, durations, (crossfadeDurationSeconds * 1000f).toLong()).associateBy { it.id }
+                    vm.applyAudioCrossfade(updated)
+                }, enabled = canCrossfade, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (canCrossfade) "Apply ${String.format(Locale.US, "%.1f", crossfadeDurationSeconds)}s crossfade into next track" else "Reading audio duration or checking selected trim ranges")
+                }
+            }
+            if (t.loop && (t.fadeInMs > 0L || t.fadeOutMs > 0L || t.gainPoints.isNotEmpty() || t.eqGainsDb.any { it != 0f })) {
+                Text("Looping is disabled while fades, volume automation or EQ processing are active.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
             }
             if (t.offsetMs == 0L) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Loop to fill the video", Modifier.weight(1f))
-                    Switch(checked = t.loop, onCheckedChange = { l -> vm.updateAudio(t.id) { it.copy(loop = l) } })
+                    Switch(checked = t.loop && t.eqGainsDb.all { it == 0f }, onCheckedChange = { l -> vm.updateAudio(t.id) { it.copy(loop = l && it.eqGainsDb.all { gain -> gain == 0f }) } })
                 }
             }
         }
     }
     if (vm.audioTracks.isEmpty()) {
         Text("No audio yet. Add music or record your voice.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+    }
+    val renamingAudio = vm.audioTracks.firstOrNull { it.id == audioRenameId }
+    if (renamingAudio != null) {
+        AlertDialog(
+            onDismissRequest = { audioRenameId = null },
+            title = { Text("Rename audio track") },
+            text = { OutlinedTextField(value = audioRenameValue, onValueChange = { audioRenameValue = it }, singleLine = true, label = { Text("Track name") }) },
+            confirmButton = { TextButton(onClick = { vm.renameAudio(renamingAudio.id, audioRenameValue); audioRenameId = null }) { Text("Save") } },
+            dismissButton = { TextButton(onClick = { audioRenameId = null }) { Text("Cancel") } }
+        )
     }
 }
 

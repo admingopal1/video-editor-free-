@@ -1,6 +1,7 @@
 package com.app.videoeditor
 
 import kotlin.math.PI
+import kotlin.math.roundToLong
 import kotlin.math.sin
 
 /**
@@ -69,18 +70,29 @@ data class TextRender(val visible: Boolean, val alpha: Float, val scale: Float, 
 /** Whether a text/sticker layer is visible at tUs (clip output time) and how it is animated. */
 fun textRender(layer: TextLayer, totalUs: Long, tUs: Long): TextRender {
     val total = totalUs.coerceAtLeast(1L)
-    val startFrac = layer.startFrac.coerceIn(0f, 1f)
-    val endFrac = layer.endFrac.coerceIn(startFrac, 1f)
-    val startUs = (startFrac * total).toLong()
-    val endUs = (endFrac * total).toLong()
-    if (tUs < startUs || tUs > endUs) return TextRender(false, 0f, layer.scale, layer.y)
-    val a = ((tUs - startUs).toFloat() / TEXT_ANIM_US).coerceIn(0f, 1f)
+    // Use the same millisecond timing normalization as timeline editing and export overlay selection.
+    // This also makes NaN/Infinity values from older or damaged projects deterministic.
+    val timing = textLayerTiming(layer, (total / 1_000L).coerceAtLeast(0L))
+    val startUs = (timing.startMs.toDouble() * 1_000.0).roundToLong().coerceIn(0L, total)
+    val endUs = (timing.endMs.toDouble() * 1_000.0).roundToLong().coerceIn(startUs, total)
+    // Text intervals are end-exclusive when they stop before the clip ends, matching timeline lanes.
+    // Keep the final clip endpoint visible for full-clip layers because the preview can seek there.
+    if (tUs < startUs || (tUs >= endUs && endUs < total)) return TextRender(false, 0f, layer.scale, layer.y)
+    val elapsedUs = (tUs - startUs).coerceAtLeast(0L)
+    val a = (elapsedUs.toFloat() / TEXT_ANIM_US).coerceIn(0f, 1f)
     return when (layer.anim) {
         TextAnim.None -> TextRender(true, 1f, layer.scale, layer.y)
         TextAnim.Fade -> TextRender(true, a, layer.scale, layer.y)
         TextAnim.Pop -> TextRender(true, 1f, layer.scale * (0.5f + 0.5f * a), layer.y)
         TextAnim.SlideUp -> TextRender(true, 1f, layer.scale, layer.y - 0.25f * (1f - a))
     }
+}
+
+/** True when export must evaluate this layer against the frame clock instead of using a static overlay. */
+fun requiresTimedTextOverlay(layer: TextLayer, clipOutputDurationMs: Long): Boolean {
+    val total = clipOutputDurationMs.coerceAtLeast(0L)
+    val timing = textLayerTiming(layer, total)
+    return layer.anim != TextAnim.None || timing.startMs > 0L || timing.endMs < total
 }
 
 /** Aspect ratio of a clip's frame after crop and rotation (what the exporter sees before fitting). */

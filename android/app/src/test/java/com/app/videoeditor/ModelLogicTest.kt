@@ -5,6 +5,47 @@ import org.junit.Test
 
 class ModelLogicTest {
     @Test
+    fun audioMuteAndSoloRulesAreConsistent() {
+        assertEquals(true, isAudioTrackAudible(false, false, false))
+        assertEquals(false, isAudioTrackAudible(true, false, false))
+        assertEquals(true, isAudioTrackAudible(false, true, true))
+        assertEquals(false, isAudioTrackAudible(false, false, true))
+        assertEquals(false, isAudioTrackAudible(true, true, true))
+    }
+
+    @Test
+    fun audioTrackNameIsTrimmedAndLimited() {
+        assertEquals("Narration", normalizedAudioTrackName("  Narration  "))
+        assertEquals(80, normalizedAudioTrackName("a".repeat(100)).length)
+        assertEquals("", normalizedAudioTrackName("   "))
+    }
+
+    @Test
+    fun duplicateAudioTrackNameAddsCopySuffix() {
+        assertEquals("Music copy", duplicateAudioTrackName("Music"))
+    }
+
+    @Test
+    fun audioTrackReorderMovesOneStepAndRespectsBoundaries() {
+        val ids = listOf(10L, 20L, 30L)
+        assertEquals(listOf(20L, 10L, 30L), moveAudioTrackId(ids, 10L, 1))
+        assertEquals(listOf(10L, 30L, 20L), moveAudioTrackId(ids, 30L, -1))
+        assertEquals(ids, moveAudioTrackId(ids, 10L, -1))
+        assertEquals(ids, moveAudioTrackId(ids, 30L, 1))
+        assertEquals(ids, moveAudioTrackId(ids, 99L, 1))
+        assertEquals(ids, moveAudioTrackId(ids, 20L, 0))
+    }
+
+    @Test
+    fun voiceGateRespectsTrimStartAndEnd() {
+        val wave = floatArrayOf(0f, 0f, 0.9f, 0.9f, 0f, 0f)
+        val points = buildTrimmedVoiceGatePoints(wave, 200L, 400L, 0.1f)
+        assertEquals(0L, points.first().timeMs)
+        assertEquals(true, audioKeyframeGainAt(points, 0L) > 0.9f)
+        assertEquals(200L, points.last().timeMs)
+    }
+
+    @Test
     fun emptyKeyframesReturnNeutralFrameAtRequestedTime() {
         val result = interpKeyframes(emptyList(), 0.4f)
 
@@ -78,4 +119,209 @@ class ModelLogicTest {
         assertEquals(false, shouldDeleteStaleExportFile("export_future.mp4", 100_001L, cutoff))
     }
 
+    @Test
+    fun missingLegacyTrimEndKeepsFullSource() {
+        assertEquals(Long.MAX_VALUE, normalizedAudioTrimEndMs(null, 500L))
+    }
+
+    @Test
+    fun trimEndIsAlwaysAfterTrimStart() {
+        assertEquals(1_001L, normalizedAudioTrimEndMs(900L, 1_000L))
+        assertEquals(8_900L, normalizedAudioTrimEndMs(8_900L, 1_000L))
+    }
+
+    @Test
+    fun audioTrackOutputDurationMatchesTrimAndProjectBounds() {
+        assertEquals(10_000L, audioTrackOutputDurationMs(2_000L, 20_000L, 5_000L, 15_000L))
+        assertEquals(3_000L, audioTrackOutputDurationMs(2_000L, 5_000L, 0L, 20_000L))
+        assertEquals(0L, audioTrackOutputDurationMs(2_000L, 20_000L, 30_000L, 15_000L))
+        assertEquals(0L, audioTrackOutputDurationMs(2_000L, 1_000L, 0L, 15_000L))
+        assertEquals(10_000L, audioTrackOutputDurationMs(2_000L, Long.MAX_VALUE, 5_000L, 15_000L))
+    }
+
+    @Test
+    fun previewAudioGainCombinesFadeAutomationDuckingAndGate() {
+        assertEquals(0.1f, combinedPreviewAudioGain(0.8f, 0.5f, 0.5f, 0.5f, 1f, true), 0.0001f)
+        assertEquals(0f, combinedPreviewAudioGain(1f, 1f, 1f, 1f, 1f, false), 0.0001f)
+        assertEquals(2f, combinedPreviewAudioGain(2f, 1f, 1f, 1f, 1f, true), 0.0001f)
+        assertEquals(4f, combinedPreviewAudioGain(2f, 1f, 2f, 1f, 1f, true), 0.0001f)
+        assertEquals(0f, combinedPreviewAudioGain(Float.NaN, 1f, 1f, 1f, 1f, true), 0.0001f)
+        assertEquals(0f, combinedPreviewAudioGain(1f, Float.POSITIVE_INFINITY, 1f, 1f, 1f, true), 0.0001f)
+    }
+
+    @Test
+    fun audioPlayerResyncsOnlyAfterDriftThresholdOrWhenForced() {
+        assertEquals(false, shouldResyncAudioPlayer(1_000L, 1_120L))
+        assertEquals(true, shouldResyncAudioPlayer(1_000L, 1_121L))
+        assertEquals(true, shouldResyncAudioPlayer(1_000L, 1_000L, force = true))
+        assertEquals(false, shouldResyncAudioPlayer(2_000L, 1_880L))
+        assertEquals(true, shouldResyncAudioPlayer(2_000L, 1_879L))
+    }
+
+    @Test
+    fun crossfadeAlignsNextTrackAndSetsMatchingFadeEnvelopes() {
+        val first = AudioCrossfadeState(1L, 0L, 0L, Long.MAX_VALUE, 0L, 0L, true)
+        val second = AudioCrossfadeState(2L, 9_000L, 0L, Long.MAX_VALUE, 0L, 0L, true)
+        val result = configureAudioCrossfade(listOf(first, second), 1L, mapOf(1L to 10_000L, 2L to 8_000L), 2_000L)
+        assertEquals(10_000L, result[0].trimEndMs)
+        assertEquals(2_000L, result[0].fadeOutMs)
+        assertEquals(8_000L, result[1].offsetMs)
+        assertEquals(2_000L, result[1].fadeInMs)
+        assertEquals(false, result[0].loop)
+        assertEquals(false, result[1].loop)
+    }
+
+    @Test
+    fun crossfadeUsesFullSourceDurationForLongTracksBeyondWaveformLimit() {
+        val longDuration = 45L * 60L * 1_000L
+        val first = AudioCrossfadeState(1L, 0L, 0L, Long.MAX_VALUE, 0L, 0L, false)
+        val second = AudioCrossfadeState(2L, 2_600_000L, 0L, Long.MAX_VALUE, 0L, 0L, false)
+        val result = configureAudioCrossfade(
+            listOf(first, second),
+            1L,
+            mapOf(1L to longDuration, 2L to 900_000L),
+            3_000L
+        )
+        assertEquals(longDuration, result[0].trimEndMs)
+        assertEquals(3_000L, result[0].fadeOutMs)
+        assertEquals(longDuration - 3_000L, result[1].offsetMs)
+        assertEquals(3_000L, result[1].fadeInMs)
+    }
+
+    @Test
+    fun crossfadeRespectsBothTracksSelectedTrimRanges() {
+        val first = AudioCrossfadeState(1L, 0L, 5_000L, 20_000L, 0L, 0L, false)
+        val second = AudioCrossfadeState(2L, 30_000L, 2_000L, 7_000L, 0L, 0L, false)
+        val result = configureAudioCrossfade(listOf(first, second), 1L, mapOf(1L to 25_000L, 2L to 10_000L), 8_000L)
+        assertEquals(5_000L, result[0].fadeOutMs)
+        assertEquals(5_000L, result[1].fadeInMs)
+        assertEquals(20_000L, result[0].trimEndMs)
+        assertEquals(10_000L, result[1].offsetMs)
+    }
+
+    @Test
+    fun crossfadeDoesNotChangeTracksWithoutKnownDurationsOrNextTrack() {
+        val first = AudioCrossfadeState(1L, 0L, 0L, Long.MAX_VALUE, 0L, 0L, false)
+        val second = AudioCrossfadeState(2L, 5_000L, 0L, Long.MAX_VALUE, 0L, 0L, false)
+        assertEquals(listOf(first), configureAudioCrossfade(listOf(first), 1L, mapOf(1L to 10_000L), 2_000L))
+        assertEquals(listOf(first, second), configureAudioCrossfade(listOf(first, second), 1L, emptyMap(), 2_000L))
+    }
+
+    @Test
+    fun audioFadeEnvelopeRampsInAndOut() {
+        assertEquals(0f, audioFadeGainAt(0L, 1_000L, 200L, 300L), 0.0001f)
+        assertEquals(0.5f, audioFadeGainAt(100L, 1_000L, 200L, 300L), 0.0001f)
+        assertEquals(1f, audioFadeGainAt(200L, 1_000L, 200L, 300L), 0.0001f)
+        assertEquals(0.5f, audioFadeGainAt(850L, 1_000L, 200L, 300L), 0.0001f)
+        assertEquals(0f, audioFadeGainAt(1_000L, 1_000L, 200L, 300L), 0.0001f)
+    }
+
+    @Test
+    fun audioFadeEnvelopeClampsOutsideTrackDuration() {
+        assertEquals(0f, audioFadeGainAt(-100L, 1_000L, 250L, 250L), 0.0001f)
+        assertEquals(0f, audioFadeGainAt(1_100L, 1_000L, 250L, 250L), 0.0001f)
+        assertEquals(1f, audioFadeGainAt(500L, 1_000L, 0L, 0L), 0.0001f)
+    }
+
+    @Test
+    fun overlappingAudioFadesAreShortenedProportionally() {
+        assertEquals(0f, audioFadeGainAt(0L, 1_000L, 800L, 800L), 0.0001f)
+        assertEquals(1f, audioFadeGainAt(500L, 1_000L, 800L, 800L), 0.0001f)
+        assertEquals(0f, audioFadeGainAt(1_000L, 1_000L, 800L, 800L), 0.0001f)
+    }
+
+    @Test
+    fun extremeFadeDurationsDoNotOverflow() {
+        assertEquals(1f, audioFadeGainAt(500L, 1_000L, Long.MAX_VALUE, Long.MAX_VALUE), 0.0001f)
+    }
+
+    @Test
+    fun audioGainKeyframesInterpolateAndClamp() {
+        val points = listOf(AudioGainPoint(0L, 0f), AudioGainPoint(1_000L, 2f))
+        assertEquals(0f, audioKeyframeGainAt(points, 0L), 0.0001f)
+        assertEquals(1f, audioKeyframeGainAt(points, 500L), 0.0001f)
+        assertEquals(2f, audioKeyframeGainAt(points, 1_500L), 0.0001f)
+    }
+
+    @Test
+    fun audioGainAutomationStaysAtUnityBeforeFirstPoint() {
+        val points = listOf(AudioGainPoint(2_000L, 0.25f), AudioGainPoint(4_000L, 1.5f))
+        assertEquals(1f, audioKeyframeGainAt(points, 0L), 0.0001f)
+        assertEquals(1f, audioKeyframeGainAt(points, 1_999L), 0.0001f)
+        assertEquals(0.25f, audioKeyframeGainAt(points, 2_000L), 0.0001f)
+    }
+
+    @Test
+    fun voiceDuckingFollowsVoiceoverOffsetAndReturnsTowardUnity() {
+        val voice = VoiceoverActivity(id = 7L, offsetMs = 1_000L, trimStartMs = 0L, trimEndMs = Long.MAX_VALUE)
+        val peaks = FloatArray(30) { index -> if (index in 0..5) 0.9f else 0f }
+        val points = buildVoiceDuckingPoints(listOf(voice), mapOf(7L to peaks), 3_000L, 0L)
+        assertEquals(1f, audioKeyframeGainAt(points, 0L), 0.0001f)
+        assertEquals(true, audioKeyframeGainAt(points, 1_500L) < 0.5f)
+        assertEquals(true, audioKeyframeGainAt(points, 2_800L) > audioKeyframeGainAt(points, 1_500L))
+    }
+
+    @Test
+    fun audioGainKeyframesUseSortedBinarySearchInterpolation() {
+        val points = listOf(AudioGainPoint(0L, 0f), AudioGainPoint(1_000L, 2f), AudioGainPoint(2_000L, 1f))
+        assertEquals(1f, audioKeyframeGainAt(points, 500L), 0.0001f)
+        assertEquals(1.5f, audioKeyframeGainAt(points, 1_500L), 0.0001f)
+    }
+
+    @Test
+    fun emptyAudioGainKeyframesKeepUnityGain() {
+        assertEquals(1f, audioKeyframeGainAt(emptyList(), 500L), 0.0001f)
+    }
+
+    @Test
+    fun movingAutomationPointPreservesUniqueTimesAndGainValues() {
+        val points = listOf(AudioGainPoint(100L, 0.2f), AudioGainPoint(200L, 0.8f), AudioGainPoint(300L, 1.4f))
+        val moved = moveAudioGainPoint(points, 1, 100L)
+        assertEquals(listOf(100L, 300L, 400L), moved.map { it.timeMs })
+        assertEquals(0.8f, moved.first { it.timeMs == 400L }.gain, 0.0001f)
+        assertEquals(points, moveAudioGainPoint(points, -1, 100L))
+    }
+
+    @Test
+    fun movingAutomationPointBackwardClampsAtZeroAndSkipsOccupiedTimes() {
+        val points = listOf(AudioGainPoint(0L, 0.3f), AudioGainPoint(100L, 0.7f), AudioGainPoint(200L, 1.1f))
+        val moved = moveAudioGainPoint(points, 2, -200L)
+        assertEquals(listOf(0L, 100L, 200L), moved.map { it.timeMs })
+        assertEquals(1.1f, moved.last().gain, 0.0001f)
+    }
+
+    @Test
+    fun pcmFloatSamplesAreClampedAndNonFiniteSamplesAreSilenced() {
+        assertEquals(1f, clampPcmFloatSample(1.5f), 0.0001f)
+        assertEquals(-1f, clampPcmFloatSample(-2f), 0.0001f)
+        assertEquals(0.25f, clampPcmFloatSample(0.25f), 0.0001f)
+        assertEquals(0f, clampPcmFloatSample(Float.NaN), 0.0001f)
+        assertEquals(0f, clampPcmFloatSample(Float.POSITIVE_INFINITY), 0.0001f)
+    }
+
+
+    @Test
+    fun sequentialAudioEnvelopeCursorMatchesReferenceInterpolation() {
+        val points = listOf(
+            AudioGainPoint(200L, 0.25f),
+            AudioGainPoint(700L, 1.5f),
+            AudioGainPoint(1_400L, 0.4f),
+            AudioGainPoint(2_000L, 1.8f)
+        )
+        val cursor = AudioGainEnvelopeCursor(points)
+        val times = listOf(0L, 199L, 200L, 201L, 450L, 700L, 999L, 1_400L, 1_999L, 2_000L, 2_500L)
+        times.forEach { time ->
+            assertEquals(audioKeyframeGainAt(points, time), cursor.gainAt(time), 0.0001f)
+        }
+    }
+
+    @Test
+    fun sequentialAudioEnvelopeCursorCanResetForAReplayedExport() {
+        val points = listOf(AudioGainPoint(0L, 0.2f), AudioGainPoint(1_000L, 1.8f))
+        val cursor = AudioGainEnvelopeCursor(points)
+        assertEquals(1.8f, cursor.gainAt(1_000L), 0.0001f)
+        cursor.reset()
+        assertEquals(0.2f, cursor.gainAt(0L), 0.0001f)
+        assertEquals(1f, AudioGainEnvelopeCursor(emptyList()).gainAt(500L), 0.0001f)
+    }
 }

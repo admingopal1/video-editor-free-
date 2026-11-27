@@ -3,6 +3,8 @@
 package com.app.videoeditor
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Paint
@@ -27,6 +29,7 @@ import androidx.media3.common.audio.ChannelMixingAudioProcessor
 import androidx.media3.common.audio.ChannelMixingMatrix
 import androidx.media3.common.audio.SonicAudioProcessor
 import androidx.media3.effect.Brightness
+import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.Contrast
 import androidx.media3.effect.Crop
 import androidx.media3.effect.FrameDropEffect
@@ -82,6 +85,34 @@ private fun animEffect(c: Clip): Effect? {
         }
     }
 }
+
+/** A still-image PIP overlay that is visible only during its timeline interval. */
+private class TimedBitmapOverlay(
+    private val bitmap: Bitmap,
+    private val layer: OverlayClip,
+    private val startUs: Long,
+    private val endUs: Long
+) : BitmapOverlay() {
+    override fun getBitmap(presentationTimeUs: Long): Bitmap = bitmap
+
+    override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings {
+        val visible = presentationTimeUs >= startUs && presentationTimeUs < endUs
+        return OverlaySettings.Builder()
+            .setBackgroundFrameAnchor(layer.x, layer.y)
+            .setOverlayFrameAnchor(0f, 0f)
+            .setScale(layer.scale, layer.scale)
+            .setRotationDegrees(layer.rotation)
+            .setAlphaScale(if (visible) layer.opacity else 0f)
+            .build()
+    }
+}
+
+private fun decodeOverlayBitmap(context: Context, layer: OverlayClip): Bitmap? =
+    runCatching {
+        context.contentResolver.openInputStream(Uri.parse(layer.uriString))?.use {
+            BitmapFactory.decodeStream(it)
+        }
+    }.getOrNull()
 
 private fun diagMatrix(o: Float): FloatArray {
     val f = o.coerceIn(0f, 1f)
@@ -221,7 +252,7 @@ private fun timedOverlay(c: Clip, t: TextLayer): TextureOverlay {
 
 private fun textOverlays(c: Clip): List<TextureOverlay> =
     c.layers.filter { it.text.isNotBlank() }.map { t ->
-        if (t.startFrac > 0f || t.endFrac < 1f || t.anim != TextAnim.None) {
+        if (requiresTimedTextOverlay(t, c.outputMs)) {
             timedOverlay(c, t)
         } else {
             TextOverlay.createStaticTextOverlay(
@@ -294,7 +325,7 @@ fun buildPreviewGlEffects(c: Clip): List<Effect> {
 }
 
 /** Visual effects for one clip. Time-based effects (animation, fade) and speed are export-only. */
-fun buildVideoEffects(c: Clip, presentation: Presentation?, forExport: Boolean, fps: Int = 0, kfFrac: Float = -1f): List<Effect> {
+fun buildVideoEffects(c: Clip, presentation: Presentation?, forExport: Boolean, fps: Int = 0, kfFrac: Float = -1f, overlayLayers: List<OverlayClip> = emptyList(), clipTimelineStartMs: Long = 0L, overlayContext: Context? = null): List<Effect> {
     val l = mutableListOf<Effect>()
     if (forExport && c.speed != 1f && !c.isImage) l += SpeedChangeEffect(c.speed)
 
@@ -317,15 +348,31 @@ fun buildVideoEffects(c: Clip, presentation: Presentation?, forExport: Boolean, 
     if (forExport && fps > 0) l += FrameDropEffect.createDefaultFrameDropEffect(fps.toFloat())
     if (presentation != null) l += presentation
 
-    val overlays = textOverlays(c)
-    if (overlays.isNotEmpty()) l += OverlayEffect(ImmutableList.copyOf<TextureOverlay>(overlays))
+    if (forExport && overlayContext != null && overlayLayers.isNotEmpty()) {
+        val imageOverlays = overlayLayers
+            .filter { it.isImage && it.isValidOverlayClip() }
+            .mapNotNull { layer ->
+                val fromMs = (layer.timelineStartMs - clipTimelineStartMs).coerceAtLeast(0L)
+                val toMs = (layer.timelineEndMs - clipTimelineStartMs).coerceAtMost(c.outputMs)
+                if (toMs <= fromMs) return@mapNotNull null
+                val bitmap = decodeOverlayBitmap(overlayContext, layer) ?: return@mapNotNull null
+                TimedBitmapOverlay(bitmap, layer, fromMs * 1000L, toMs * 1000L)
+            }
+        if (imageOverlays.isNotEmpty()) l += OverlayEffect(ImmutableList.copyOf<TextureOverlay>(imageOverlays))
+    }
+    val textTextureOverlays = textOverlays(c)
+    if (textTextureOverlays.isNotEmpty()) l += OverlayEffect(ImmutableList.copyOf<TextureOverlay>(textTextureOverlays))
     return l
 }
 
 fun buildAudioProcessors(c: Clip): List<AudioProcessor> {
     val l = mutableListOf<AudioProcessor>()
+    if (!c.isImage && c.audioEqGainsDb.any { it != 0f }) l += AudioEqualizerProcessor(c.audioEqGainsDb)
     if (c.speed != 1f && !c.isImage) l += SonicAudioProcessor().apply { setSpeed(c.speed) }
     if (c.volume != 1f && !c.muted) l += volumeProcessor(c.volume)
+    if (c.audioFadeInMs > 0L || c.audioFadeOutMs > 0L) {
+        l += AudioFadeProcessor(c.audioFadeInMs, c.audioFadeOutMs, c.outputMs)
+    }
     return l
 }
 
@@ -339,9 +386,15 @@ fun buildComposition(
     clips: List<Clip>,
     presentation: Presentation,
     tracks: List<AudioTrack>,
-    fps: Int = 0
+    fps: Int = 0,
+    overlayLayers: List<OverlayClip> = emptyList(),
+    duckingPoints: Map<Long, List<AudioGainPoint>> = emptyMap(),
+    noiseGatePoints: Map<Long, List<AudioGainPoint>> = emptyMap()
 ): Composition {
+    var clipTimelineStartMs = 0L
     val items = clips.map { c ->
+        val clipStartMs = clipTimelineStartMs
+        clipTimelineStartMs += c.outputMs
         val builder = if (c.isImage) {
             EditedMediaItem.Builder(MediaItem.fromUri(c.uri))
                 .setDurationUs(c.trimmedMs * 1000L)
@@ -358,27 +411,40 @@ fun buildComposition(
                 ).build()
             EditedMediaItem.Builder(mi).setRemoveAudio(c.muted)
         }
-        builder.setEffects(Effects(buildAudioProcessors(c), buildVideoEffects(c, presentation, true, fps))).build()
+        builder.setEffects(Effects(buildAudioProcessors(c), buildVideoEffects(c, presentation, true, fps, overlayLayers = overlayLayers, clipTimelineStartMs = clipStartMs, overlayContext = ctx))).build()
     }
     val sequences = mutableListOf(EditedMediaItemSequence(items))
 
     val totalMs = clips.sumOf { it.outputMs }
     var loopUsed = false
+    val soloActive = tracks.any { it.solo && !it.muted }
     for (t in tracks) {
-        if (t.offsetMs >= totalMs) continue
+        if (!isAudioTrackAudible(t.muted, t.solo, soloActive) || t.offsetMs >= totalMs) continue
         val audioItems = mutableListOf<EditedMediaItem>()
         if (t.offsetMs > 0L) {
             audioItems += EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(makeSilence(ctx, t.offsetMs))))
                 .setRemoveVideo(true).build()
         }
-        val loop = t.loop && t.offsetMs == 0L && !loopUsed
+        val loop = t.loop && t.fadeInMs == 0L && t.fadeOutMs == 0L && t.gainPoints.isEmpty() && t.eqGainsDb.all { it == 0f } && duckingPoints[t.id].isNullOrEmpty() && noiseGatePoints[t.id].isNullOrEmpty() && t.offsetMs == 0L && !loopUsed
         if (loop) loopUsed = true
         val clipping = MediaItem.ClippingConfiguration.Builder().setStartPositionMs(t.trimStartMs)
-        if (!loop) clipping.setEndPositionMs(t.trimStartMs + (totalMs - t.offsetMs))
+        val effectiveDuration = audioTrackOutputDurationMs(t.trimStartMs, t.trimEndMs, t.offsetMs, totalMs)
+        val effectiveEnd = t.trimStartMs + effectiveDuration
+        if (loop && t.trimEndMs != Long.MAX_VALUE) {
+            clipping.setEndPositionMs(t.trimEndMs)
+        } else if (!loop) {
+            clipping.setEndPositionMs(effectiveEnd)
+        }
         val mi = MediaItem.Builder().setUri(t.uri).setClippingConfiguration(clipping.build()).build()
         audioItems += EditedMediaItem.Builder(mi)
             .setRemoveVideo(true)
-            .setEffects(Effects(if (t.volume != 1f) listOf(volumeProcessor(t.volume)) else emptyList(), emptyList()))
+             .setEffects(Effects(buildList {
+                if (t.eqGainsDb.any { it != 0f }) add(AudioEqualizerProcessor(t.eqGainsDb))
+                if (t.volume != 1f) add(volumeProcessor(t.volume))
+                if (t.fadeInMs > 0L || t.fadeOutMs > 0L || t.gainPoints.isNotEmpty() || !duckingPoints[t.id].isNullOrEmpty() || !noiseGatePoints[t.id].isNullOrEmpty()) {
+                    add(AudioFadeProcessor(t.fadeInMs, t.fadeOutMs, (effectiveEnd - t.trimStartMs).coerceAtLeast(0L), t.gainPoints, duckingPoints[t.id] ?: emptyList(), noiseGatePoints[t.id] ?: emptyList()))
+                }
+            }, emptyList()))
             .build()
         sequences += EditedMediaItemSequence(audioItems, loop)
     }

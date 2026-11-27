@@ -113,8 +113,8 @@ class PreviewMathTest {
         val l = layer(0.25f, 0.75f, TextAnim.None)
         assertFalse(textRender(l, total, 999_999).visible)
         assertTrue(textRender(l, total, 1_000_000).visible)
-        assertTrue(textRender(l, total, 3_000_000).visible)
-        assertFalse(textRender(l, total, 3_000_001).visible)
+        assertTrue(textRender(l, total, 2_999_999).visible)
+        assertFalse(textRender(l, total, 3_000_000).visible)
     }
 
     @Test
@@ -124,6 +124,35 @@ class PreviewMathTest {
         assertTrue(textRender(l, total, 0).visible)
         assertTrue(textRender(l, total, total).visible)
         assertEquals(1f, textRender(l, total, 2_000_000).alpha, 0.001f)
+    }
+
+    @Test
+    fun malformedFullClipTimingMatchesStaticExportVisibility() {
+        val total = 4_000_000L
+        val malformed = layer(Float.NaN, Float.NaN, TextAnim.None)
+        assertFalse(requiresTimedTextOverlay(malformed, 4_000L))
+        assertTrue(textRender(malformed, total, 0L).visible)
+        assertTrue(textRender(malformed, total, 2_000_000L).visible)
+        assertTrue(textRender(malformed, total, total).visible)
+    }
+
+    @Test
+    fun malformedPartialTimingUsesTimedOverlayAndSharedPreviewRange() {
+        val total = 4_000_000L
+        val malformed = layer(Float.NaN, 0.5f, TextAnim.None)
+        assertTrue(requiresTimedTextOverlay(malformed, 4_000L))
+        assertTrue(textRender(malformed, total, 0L).visible)
+        assertTrue(textRender(malformed, total, 1_999_999L).visible)
+        assertFalse(textRender(malformed, total, 2_000_000L).visible)
+    }
+
+    @Test
+    fun infiniteTextTimingIsNormalizedConsistently() {
+        val total = 4_000_000L
+        val malformed = layer(Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY, TextAnim.None)
+        assertFalse(requiresTimedTextOverlay(malformed, 4_000L))
+        assertTrue(textRender(malformed, total, 0L).visible)
+        assertTrue(textRender(malformed, total, 3_000_000L).visible)
     }
 
     @Test

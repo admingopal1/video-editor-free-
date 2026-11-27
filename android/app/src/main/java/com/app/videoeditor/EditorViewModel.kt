@@ -53,12 +53,30 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
+
 import org.json.JSONObject
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
 @OptIn(FlowPreview::class)
+internal fun calculateProjectDurationMs(segments: List<Triple<Long, Long, Double>>): Long {
+    var total = 0L
+    for ((startMs, endMs, speed) in segments) {
+        if (startMs < 0L || endMs <= startMs || !speed.isFinite() || speed <= 0.0) continue
+        val sourceDuration = endMs - startMs
+        val outputDuration = sourceDuration.toDouble() / speed
+        val durationMs = if (!outputDuration.isFinite() || outputDuration >= Long.MAX_VALUE.toDouble()) {
+            Long.MAX_VALUE
+        } else {
+            outputDuration.toLong().coerceAtLeast(0L)
+        }
+        total = if (durationMs > Long.MAX_VALUE - total) Long.MAX_VALUE else total + durationMs
+        if (total == Long.MAX_VALUE) break
+    }
+    return total
+}
+
 class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private val ctx get() = getApplication<Application>()
     private val prefs = ctx.getSharedPreferences("project", Context.MODE_PRIVATE)
@@ -68,6 +86,11 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     var projectId by mutableStateOf(""); private set
     var projectName by mutableStateOf("My project")
     var projects by mutableStateOf(listOf<ProjectInfo>()); private set
+    /** Keep original project JSON untouched until the user accepts missing-media recovery. */
+    var missingMediaCount by mutableIntStateOf(0); private set
+    var missingMediaRecoveryPending by mutableStateOf(false); private set
+    var missingMediaItems by mutableStateOf(listOf<MissingMediaItem>()); private set
+    private var recoverySourceJson: String? = null
 
     var clips by mutableStateOf(listOf<Clip>()); private set
     var selectedId by mutableStateOf<Long?>(null)
@@ -79,8 +102,12 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     var bitrateLevel by mutableStateOf(0)   // 0 auto, 1 balanced, 2 high, 3 max
     var safeZone by mutableStateOf(false)
     var audioTracks by mutableStateOf(listOf<AudioTrack>()); private set
+    /** Secondary visual layers; persisted separately so the primary clip track remains backward-compatible. */
+    var overlayClips by mutableStateOf(listOf<OverlayClip>()); private set
     var recording by mutableStateOf(false); private set
     val waves = mutableStateMapOf<String, FloatArray>()
+    /** Full source durations from container metadata; waveform arrays may be intentionally capped. */
+    val audioSourceDurationsMs = mutableStateMapOf<String, Long>()
     private val waveLoading = mutableSetOf<String>()
     private var recorder: MediaRecorder? = null
     private var recordFile: File? = null
@@ -96,7 +123,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         clipsProvider = { clips },
         audioProvider = { audioTracks },
         onClipChanged = { c -> if (selectedId != c.id) selectedId = c.id },
-        decodePhoto = { c -> withContext(Dispatchers.IO) { decodeBitmap(c.uri, 1600) } }
+        decodePhoto = { c -> withContext(Dispatchers.IO) { decodeBitmap(c.uri, 1600) } },
+        waveformProvider = { waves[it.toString()] }
     )
     private var transformer: Transformer? = null
     private val exportTracker = ExportRequestTracker()
@@ -123,6 +151,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private data class EditorSnapshot(
         val clips: List<Clip>,
         val audioTracks: List<AudioTrack>,
+        val overlayClips: List<OverlayClip>,
         val aspect: Aspect,
         val quality: Int,
         val fill: Boolean,
@@ -139,6 +168,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private fun snapshot(): EditorSnapshot = EditorSnapshot(
         clips = clips.toList(),
         audioTracks = audioTracks.toList(),
+        overlayClips = overlayClips.toList(),
         aspect = aspect,
         quality = quality,
         fill = fill,
@@ -149,6 +179,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     private fun restore(snapshot: EditorSnapshot) {
         clips = snapshot.clips
         audioTracks = snapshot.audioTracks
+        overlayClips = snapshot.overlayClips
         aspect = snapshot.aspect
         quality = snapshot.quality
         fill = snapshot.fill
@@ -243,7 +274,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
             val target = projects.firstOrNull { it.id == last }?.id ?: projects.firstOrNull()?.id
             if (target == null || !loadInto(target)) { startEmpty("My project"); saveNow() }
             snapshotFlow {
-                listOf<Any?>(clips, audioTracks, aspect, quality, fill, fps, bitrateLevel, projectName)
+                listOf<Any?>(clips, audioTracks, overlayClips, aspect, quality, fill, fps, bitrateLevel, projectName)
             }.debounce(600).collect { saveNow() }
         }
     }
@@ -252,10 +283,25 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val old = prefs.getString("project", null) ?: return
         val hasProjects = projectsDir.listFiles { f -> f.extension == "json" }?.isNotEmpty() == true
         if (!hasProjects) {
-            runCatching {
-                val o = JSONObject(old).put("name", "My project").put("updated", System.currentTimeMillis())
-                File(projectsDir, "1.json").writeText(o.toString())
-            }
+            // Do not delete the legacy preference until its replacement is durably written.
+            val migrated = runCatching {
+                val json = JSONObject(old)
+                    .put("name", "My project")
+                    .put("updated", System.currentTimeMillis())
+                    .toString()
+                val destination = AtomicFile(File(projectsDir, "1.json"))
+                var stream: java.io.FileOutputStream? = null
+                try {
+                    stream = destination.startWrite()
+                    stream.write(json.toByteArray(Charsets.UTF_8))
+                    destination.finishWrite(stream)
+                    stream = null
+                } catch (error: Exception) {
+                    stream?.let { destination.failWrite(it) }
+                    throw error
+                }
+            }.isSuccess
+            if (!migrated) return
         }
         prefs.edit().remove("project").apply()
     }
@@ -266,6 +312,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         o.put("name", projectName); o.put("updated", System.currentTimeMillis())
         o.put("clips", JSONArray().apply { clips.forEach { put(it.toJson()) } })
         o.put("audio", JSONArray().apply { audioTracks.forEach { put(it.toJson()) } })
+        o.put("overlayClips", JSONArray().apply { overlayClips.forEach { put(it.toJson()) } })
         o.put("aspect", aspect.name); o.put("quality", quality); o.put("fill", fill)
         o.put("fps", fps); o.put("bitrate", bitrateLevel)
         return o.toString()
@@ -273,7 +320,78 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     private val projectSaveMutex = Mutex()
 
+    /** Reconnects one unavailable source while preserving its saved edit metadata. */
+    fun relinkMissingMedia(itemKind: String, itemId: Long, uri: Uri) {
+        val item = findMissingMediaItem(missingMediaItems, itemKind, itemId) ?: return
+        viewModelScope.launch {
+            try {
+                val mime = ctx.contentResolver.getType(uri).orEmpty()
+                val validType = mime.isBlank() || when (item.kind) {
+                    "audio" -> mime.startsWith("audio/")
+                    "clip" -> mime.startsWith("image/") || mime.startsWith("video/")
+                    "overlay" -> mime.startsWith("image/") || mime.startsWith("video/")
+                    else -> false
+                }
+                if (!validType || !canOpen(uri)) {
+                    toast("Choose a readable " + item.kind + " file of the same media type.")
+                    return@launch
+                }
+                val source = recoverySourceJson ?: return@launch
+                val root = JSONObject(source)
+                val arrayKey = when (item.kind) {
+                    "clip" -> "clips"
+                    "audio" -> "audio"
+                    "overlay" -> "overlayClips"
+                    else -> return@launch
+                }
+                val entries = root.optJSONArray(arrayKey) ?: return@launch
+                var replaced = false
+                for (i in 0 until entries.length()) {
+                    val entry = entries.optJSONObject(i) ?: continue
+                    if (entry.optLong("id", Long.MIN_VALUE) == item.id) {
+                        entry.put("uri", uri.toString())
+                        replaced = true
+                        break
+                    }
+                }
+                if (!replaced) {
+                    toast("The original media entry could not be found. Original backup is preserved.")
+                    return@launch
+                }
+                val updatedSource = root.toString()
+                val loaded = withContext(Dispatchers.IO) { loadFromJson(updatedSource) }
+                if (loaded == null || loaded.missing.any { it.kind == item.kind && it.id == item.id }) {
+                    toast("That file could not restore this media item. Try the original source file.")
+                    return@launch
+                }
+                recoverySourceJson = updatedSource.takeIf { loaded.dropped > 0 }
+                applyLoaded(projectId, loaded)
+                toast(if (loaded.dropped == 0) "All available media reconnected. You can save the project now." else "Media reconnected. " + loaded.missing.size + " source(s) still need relinking.")
+            } catch (e: Exception) {
+                toast(e.message ?: "Could not relink this media. Original backup is preserved.")
+            }
+        }
+    }
+
+    /** Explicitly accepts a recovered project after missing source media was skipped. */
+    fun saveRecoveredProject() {
+        if (!missingMediaRecoveryPending) return
+        missingMediaRecoveryPending = false
+        viewModelScope.launch {
+            try {
+                saveNow()
+                toast("Recovered project saved. Original backup is retained.")
+            } catch (e: Exception) {
+                // Keep the warning and autosave guard active if the atomic write failed.
+                missingMediaRecoveryPending = true
+                toast(e.message ?: "Could not save the recovered project. Original backup is retained.")
+            }
+        }
+    }
+
     private suspend fun saveNow() {
+        // Do not overwrite the original project after dropping inaccessible media without explicit user approval.
+        if (missingMediaRecoveryPending) return
         val saved = projectSaveMutex.withLock {
             // Capture the project identity and matching content together before leaving the main thread.
             val id = projectId
@@ -322,12 +440,17 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                 runCatching {
                     val o = JSONObject(f.readText())
                     val arr = o.optJSONArray("clips")
-                    var dur = 0L
+                    val segments = mutableListOf<Triple<Long, Long, Double>>()
                     if (arr != null) for (i in 0 until arr.length()) {
-                        val c = arr.getJSONObject(i)
-                        dur += ((c.getLong("end") - c.getLong("start")) / c.optDouble("speed", 1.0)).toLong()
+                        val clip = arr.optJSONObject(i) ?: continue
+                        segments += Triple(
+                            clip.optLong("start", -1L),
+                            clip.optLong("end", -1L),
+                            clip.optDouble("speed", 1.0)
+                        )
                     }
-                    ProjectInfo(f.nameWithoutExtension, o.optString("name", "Untitled"), o.optLong("updated", f.lastModified()), arr?.length() ?: 0, dur)
+                    val duration = calculateProjectDurationMs(segments)
+                    ProjectInfo(f.nameWithoutExtension, o.optString("name", "Untitled"), o.optLong("updated", f.lastModified()), arr?.length() ?: 0, duration)
                 }.getOrNull()
             }.sortedByDescending { it.updated }
         }
@@ -336,7 +459,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     fun projectThumb(id: String): Bitmap? = BitmapFactory.decodeFile(File(projectsDir, "$id.jpg").path)
 
-    private class Loaded(val o: JSONObject, val clips: List<Clip>, val thumbs: Map<Long, Bitmap>, val dropped: Int, val audio: List<AudioTrack>)
+    private class Loaded(val o: JSONObject, val clips: List<Clip>, val thumbs: Map<Long, Bitmap>, val dropped: Int, val audio: List<AudioTrack>, val overlays: List<OverlayClip>, val missing: List<MissingMediaItem>, val raw: String)
 
     private fun canOpen(uri: Uri): Boolean = try {
         ctx.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false
@@ -346,32 +469,64 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun loadFromJson(raw: String): Loaded? = runCatching {
         val o = JSONObject(raw)
-        val arr = o.getJSONArray("clips")
+        val arr = o.optJSONArray("clips") ?: JSONArray()
         val list = mutableListOf<Clip>()
+        val clipIds = mutableSetOf<Long>()
         val th = mutableMapOf<Long, Bitmap>()
         var dropped = 0
+        val missing = mutableListOf<MissingMediaItem>()
         for (i in 0 until arr.length()) {
-            val c = clipFromJson(arr.getJSONObject(i))
+            val clipJson = arr.optJSONObject(i)
+            val clip = runCatching { clipJson?.let { clipFromJson(it) } }.getOrNull()
+            if (clip == null || !clip.isValidProjectClip() || !clipIds.add(clip.id)) {
+                // A corrupt or duplicate clip must not make the entire project unrecoverable.
+                dropped++
+                continue
+            }
+            val c = clip
+            if (!canOpen(c.uri)) {
+                dropped++
+                missing += MissingMediaItem("clip", c.id, displayName(c.uri))
+                continue
+            }
             if (c.isImage) {
-                val b = decodeBitmap(c.uri, 320)
-                if (b != null) { list += c; th[c.id] = b } else dropped++
+                val bitmap = runCatching { decodeBitmap(c.uri, 320) }.getOrNull()
+                if (bitmap != null) { list += c; th[c.id] = bitmap } else {
+                    dropped++
+                    missing += MissingMediaItem("clip", c.id, displayName(c.uri))
+                }
             } else {
-                val r = MediaMetadataRetriever()
+                val retriever = MediaMetadataRetriever()
                 try {
-                    r.setDataSource(ctx, c.uri)
-                    r.getScaledFrameAtTime(c.startMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 240, 240)?.let { th[c.id] = it }
+                    retriever.setDataSource(ctx, c.uri)
+                    retriever.getScaledFrameAtTime(c.startMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 240, 240)?.let { th[c.id] = it }
                     list += c
                 } catch (e: Exception) {
                     dropped++
-                } finally { r.release() }
+                    missing += MissingMediaItem("clip", c.id, displayName(c.uri))
+                } finally {
+                    runCatching { retriever.release() }
+                }
             }
         }
         val tracks = mutableListOf<AudioTrack>()
         val aArr = o.optJSONArray("audio")
         if (aArr != null) {
+            val audioIds = mutableSetOf<Long>()
             for (i in 0 until aArr.length()) {
-                val t = audioFromJson(aArr.getJSONObject(i))
-                if (canOpen(t.uri)) tracks += t else dropped++
+                // One malformed audio entry must not prevent recovery of the rest of the project.
+                val audioJson = aArr.optJSONObject(i)
+                val track = runCatching { audioJson?.let { audioFromJson(it) } }.getOrNull()
+                if (track == null || !track.isValidProjectAudioTrack() || !audioIds.add(track.id)) {
+                    dropped++
+                    continue
+                }
+                if (!canOpen(track.uri)) {
+                    dropped++
+                    missing += MissingMediaItem("audio", track.id, track.name)
+                    continue
+                }
+                tracks += track
             }
         } else {
             // projects saved by older versions had a single music file
@@ -381,7 +536,34 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                 if (canOpen(u)) tracks += AudioTrack(900_000L, u, displayName(u), o.optDouble("musicVolume", 1.0).toFloat(), loop = true)
             }
         }
-        Loaded(o, list, th, dropped, tracks)
+        val overlays = mutableListOf<OverlayClip>()
+        val overlayIds = mutableSetOf<Long>()
+        val overlayArray = o.optJSONArray("overlayClips")
+        if (overlayArray != null) {
+            for (i in 0 until overlayArray.length()) {
+                val overlayJson = overlayArray.optJSONObject(i)
+                val overlay = runCatching { overlayJson?.let { overlayClipFromJson(it) } }.getOrNull()
+                if (overlay == null || !overlay.isValidOverlayClip() || !overlayIds.add(overlay.id)) {
+                    // Duplicate IDs make selection, updates and deletion ambiguous.
+                    // Keep the first valid occurrence and safely drop later duplicates.
+                    dropped++
+                    continue
+                }
+                val overlayUri = Uri.parse(overlay.uriString)
+                if (!canOpen(overlayUri)) {
+                    dropped++
+                    missing += MissingMediaItem("overlay", overlay.id, overlay.name)
+                    continue
+                }
+                if (overlay.isImage && decodeBitmap(overlayUri, 320) == null) {
+                    dropped++
+                    missing += MissingMediaItem("overlay", overlay.id, overlay.name)
+                    continue
+                }
+                overlays += overlay
+            }
+        }
+        Loaded(o, list, th, dropped, tracks, overlays, missing, raw)
     }.getOrNull()
 
     private fun resetPlayback() {
@@ -399,20 +581,26 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         projectId = id
         projectName = l.o.optString("name", "My project")
         thumbs.clear(); thumbs.putAll(l.thumbs)
+        missingMediaCount = l.dropped
+        missingMediaItems = l.missing
+        recoverySourceJson = l.raw.takeIf { l.dropped > 0 }
+        missingMediaRecoveryPending = l.dropped > 0
         undoStack.clear(); redoStack.clear(); undoCount = 0; redoCount = 0
         clips = l.clips
         nextId = maxOf(
             (clips.maxOfOrNull { c -> maxOf(c.id, c.layers.maxOfOrNull { it.id } ?: 0L) } ?: 0L),
-            l.audio.maxOfOrNull { it.id } ?: 0L
+            l.audio.maxOfOrNull { it.id } ?: 0L,
+            l.overlays.maxOfOrNull { it.id } ?: 0L
         ) + 1
         selectedId = clips.firstOrNull()?.id
         selectedLayerId = null
         audioTracks = l.audio
+        overlayClips = l.overlays
         aspect = runCatching { Aspect.valueOf(l.o.getString("aspect")) }.getOrDefault(Aspect.Original)
         quality = l.o.optInt("quality", 720); fill = l.o.optBoolean("fill", false)
         fps = l.o.optInt("fps", 0); bitrateLevel = l.o.optInt("bitrate", 0)
         prefs.edit().putString("current", id).apply()
-        if (l.dropped > 0) toast("${l.dropped} clip(s) removed: the file is no longer available")
+        if (l.dropped > 0) toast("${l.dropped} media item(s) unavailable. Original project backup preserved.")
     }
 
     private suspend fun loadInto(id: String): Boolean {
@@ -431,11 +619,15 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun startEmpty(name: String) {
+        missingMediaCount = 0
+        missingMediaItems = emptyList()
+        recoverySourceJson = null
+        missingMediaRecoveryPending = false
         resetPlayback()
         projectId = System.currentTimeMillis().toString()
         projectName = name
         thumbs.clear(); undoStack.clear(); redoStack.clear(); undoCount = 0; redoCount = 0
-        clips = emptyList(); selectedId = null; selectedLayerId = null; audioTracks = emptyList()
+        clips = emptyList(); selectedId = null; selectedLayerId = null; audioTracks = emptyList(); overlayClips = emptyList()
         prefs.edit().putString("current", projectId).apply()
     }
 
@@ -562,6 +754,117 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ---------- secondary visual layers (additive PIP photo support) ----------
+    fun addOverlayImage(uri: Uri) {
+        viewModelScope.launch {
+            val bitmap = withContext(Dispatchers.IO) { decodeBitmap(uri, 1200) }
+            if (bitmap == null) {
+                toast("Could not read this overlay image")
+                return@launch
+            }
+            val remaining = (timeline.totalMs() - timeMs).coerceAtLeast(1_000L)
+            record(true)
+            overlayClips = overlayClips + OverlayClip(
+                id = nextId++,
+                uriString = uri.toString(),
+                name = displayName(uri),
+                durationMs = remaining,
+                width = bitmap.width,
+                height = bitmap.height,
+                startMs = 0L,
+                endMs = remaining,
+                timelineStartMs = timeMs,
+                isImage = true,
+                scale = 0.32f,
+                layerOrder = overlayClips.size
+            )
+            overlayBitmaps[uri.toString()] = bitmap
+            selectedOverlayId = overlayClips.last().id
+        }
+    }
+
+    fun addOverlayVideo(uri: Uri) {
+        if (clips.isEmpty()) {
+            toast("Add a main video or photo first")
+            return
+        }
+        viewModelScope.launch {
+            val info = withContext(Dispatchers.IO) {
+                val retriever = MediaMetadataRetriever()
+                try {
+                    retriever.setDataSource(ctx, uri)
+                    val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                    var width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+                    var height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+                    val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+                    if (rotation == 90 || rotation == 270) { val swap = width; width = height; height = swap }
+                    Triple(duration, width, height)
+                } catch (_: Exception) {
+                    Triple(0L, 0, 0)
+                } finally {
+                    retriever.release()
+                }
+            }
+            val duration = info.first
+            if (duration <= 0L || info.second <= 0 || info.third <= 0) {
+                toast("Could not read this video")
+                return@launch
+            }
+            val remaining = (timeline.totalMs() - timeMs).coerceAtLeast(1L)
+            val sourceDuration = minOf(duration, remaining)
+            if (sourceDuration < 500L) {
+                toast("Move the playhead earlier to add a longer PIP video")
+                return@launch
+            }
+            record(true)
+            val layer = OverlayClip(
+                id = nextId++,
+                uriString = uri.toString(),
+                name = displayName(uri),
+                durationMs = duration,
+                width = info.second,
+                height = info.third,
+                startMs = 0L,
+                endMs = sourceDuration,
+                timelineStartMs = timeMs,
+                isImage = false,
+                muted = true,
+                scale = 0.32f,
+                layerOrder = overlayClips.size
+            )
+            overlayClips = overlayClips + layer
+            selectedOverlayId = layer.id
+        }
+    }
+
+    val overlayBitmaps = mutableStateMapOf<String, Bitmap>()
+    var selectedOverlayId by mutableStateOf<Long?>(null)
+
+    fun overlayBitmap(uriString: String): Bitmap? = overlayBitmaps[uriString]
+        ?: decodeBitmap(Uri.parse(uriString), 1200)?.also { overlayBitmaps[uriString] = it }
+
+    fun updateOverlay(id: Long, change: (OverlayClip) -> OverlayClip) {
+        if (overlayClips.none { it.id == id }) return
+        record()
+        overlayClips = overlayClips.map { if (it.id == id) change(it) else it }
+    }
+
+    fun removeOverlay(id: Long) {
+        if (overlayClips.none { it.id == id }) return
+        record(true)
+        overlayClips = overlayClips.filterNot { it.id == id }
+        if (selectedOverlayId == id) selectedOverlayId = overlayClips.lastOrNull()?.id
+    }
+
+    /** Move a selected PIP layer one level: -1 sends it backward, +1 brings it forward. */
+    fun moveOverlayLayer(id: Long, direction: Int) {
+        val reordered = reorderOverlayLayer(overlayClips, id, direction)
+        if (reordered == overlayClips) return
+        record(true)
+        overlayClips = reordered
+        selectedOverlayId = id
+    }
+
     // ---------- clip operations ----------
     fun update(id: Long, f: (Clip) -> Clip) {
         record()
@@ -629,17 +932,77 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }.getOrNull() ?: uri.lastPathSegment ?: "Audio"
 
-    fun addAudio(uri: Uri, name: String? = null, offsetMs: Long = 0L) {
+    fun addAudio(uri: Uri, name: String? = null, offsetMs: Long = 0L, isVoiceover: Boolean = false) {
         if (audioTracks.size >= 4) { toast("Up to 4 audio tracks"); return }
         record(true)
-        val first = audioTracks.isEmpty() && offsetMs == 0L
-        audioTracks = audioTracks + AudioTrack(nextId++, uri, name ?: displayName(uri), loop = first, offsetMs = offsetMs)
+        val first = audioTracks.isEmpty() && offsetMs == 0L && !isVoiceover
+        audioTracks = audioTracks + AudioTrack(nextId++, uri, name ?: displayName(uri), loop = first, offsetMs = offsetMs, isVoiceover = isVoiceover)
         ensureWaveform(uri)
     }
 
     fun updateAudio(id: Long, f: (AudioTrack) -> AudioTrack) {
         record()
         audioTracks = audioTracks.map { if (it.id == id) f(it) else it }
+    }
+
+    /** Apply a multi-track crossfade as one undoable user action. */
+    fun applyAudioCrossfade(states: Map<Long, AudioCrossfadeState>) {
+        val changed = audioTracks.any { track ->
+            val state = states[track.id] ?: return@any false
+            track.offsetMs != state.offsetMs ||
+                track.trimEndMs != state.trimEndMs ||
+                track.fadeInMs != state.fadeInMs ||
+                track.fadeOutMs != state.fadeOutMs ||
+                track.loop != state.loop
+        }
+        if (!changed) return
+        record(true)
+        audioTracks = audioTracks.map { track ->
+            val state = states[track.id] ?: return@map track
+            track.copy(
+                offsetMs = state.offsetMs,
+                trimEndMs = state.trimEndMs,
+                fadeInMs = state.fadeInMs,
+                fadeOutMs = state.fadeOutMs,
+                loop = state.loop
+            )
+        }
+    }
+
+    /** Start one undoable automation gesture; subsequent pointer updates share this snapshot. */
+    fun beginAudioAutomationDrag() {
+        record(true)
+    }
+
+    /** Apply high-frequency pointer updates without filling the undo stack on every frame. */
+    fun updateAudioAutomationDuringDrag(id: Long, f: (AudioTrack) -> AudioTrack) {
+        audioTracks = audioTracks.map { if (it.id == id) f(it) else it }
+    }
+
+    fun renameAudio(id: Long, name: String) {
+        val normalized = normalizedAudioTrackName(name)
+        if (normalized.isBlank()) { toast("Track name cannot be empty"); return }
+        val current = audioTracks.firstOrNull { it.id == id } ?: return
+        if (current.name == normalized) return
+        updateAudio(id) { it.copy(name = normalized) }
+    }
+
+    fun duplicateAudio(id: Long) {
+        if (audioTracks.size >= 4) { toast("Up to 4 audio tracks"); return }
+        val source = audioTracks.firstOrNull { it.id == id } ?: return
+        record(true)
+        val duplicate = duplicateAudioTrack(source, nextId++)
+        audioTracks = audioTracks + duplicate
+        ensureWaveform(duplicate.uri)
+        toast("Audio track duplicated")
+    }
+
+    fun moveAudioTrack(id: Long, direction: Int) {
+        val reorderedIds = moveAudioTrackId(audioTracks.map { it.id }, id, direction)
+        if (reorderedIds == audioTracks.map { it.id }) return
+        record()
+        val byId = audioTracks.associateBy { it.id }
+        audioTracks = reorderedIds.mapNotNull { byId[it] }
     }
 
     fun removeAudio(id: Long) {
@@ -652,9 +1015,29 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val key = uri.toString()
         if (waves.containsKey(key) || !waveLoading.add(key)) return
         viewModelScope.launch {
-            val w = withContext(Dispatchers.IO) { Waveform.compute(ctx, uri) } ?: FloatArray(0)
-            waves[key] = w
-            waveLoading.remove(key)
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    val duration = runCatching {
+                        MediaMetadataRetriever().let { retriever ->
+                            try {
+                                retriever.setDataSource(ctx, uri)
+                                retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                            } finally {
+                                retriever.release()
+                            }
+                        }
+                    }.getOrDefault(0L).coerceAtLeast(0L)
+                    duration to (Waveform.compute(ctx, uri) ?: FloatArray(0))
+                }
+                audioSourceDurationsMs[key] = result.first
+                waves[key] = result.second
+            } catch (_: Exception) {
+                // Keep the editor usable if a provider URI becomes unreadable or decoding fails.
+                audioSourceDurationsMs[key] = 0L
+                waves[key] = FloatArray(0)
+            } finally {
+                waveLoading.remove(key)
+            }
         }
     }
 
@@ -690,7 +1073,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         recorder = null; recording = false
         timeline.pause()
         val f = recordFile ?: return
-        if (f.exists() && f.length() > 1000) addAudio(Uri.fromFile(f), "Voiceover", recordOffsetMs) else toast("Recording was too short")
+        if (f.exists() && f.length() > 1000) addAudio(Uri.fromFile(f), "Voiceover", recordOffsetMs, isVoiceover = true) else toast("Recording was too short")
     }
 
     // ---------- keyframes, transitions, speed ramps ----------
@@ -772,9 +1155,33 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         selectedLayerId = layer.id
     }
 
+    private var layerTimingEditActive = false
+    private var layerTimingEditRecorded = false
+
+    /** Starts one undo transaction for a text/sticker timeline drag gesture. */
+    fun beginLayerTimingEdit() {
+        if (layerTimingEditActive) return
+        layerTimingEditActive = true
+        layerTimingEditRecorded = false
+    }
+
+    /** Ends the drag transaction; subsequent edits create their own undo entry. */
+    fun endLayerTimingEdit() {
+        layerTimingEditActive = false
+        layerTimingEditRecorded = false
+    }
+
     fun updateLayer(layerId: Long, f: (TextLayer) -> TextLayer) {
         val c = selected ?: return
-        update(c.id) { cl -> cl.copy(layers = cl.layers.map { if (it.id == layerId) f(it) else it }) }
+        if (layerTimingEditActive) {
+            if (!layerTimingEditRecorded) {
+                record(true)
+                layerTimingEditRecorded = true
+            }
+            clips = clips.map { if (it.id == c.id) it.copy(layers = it.layers.map { layer -> if (layer.id == layerId) f(layer) else layer }) else it }
+        } else {
+            update(c.id) { cl -> cl.copy(layers = cl.layers.map { if (it.id == layerId) f(it) else it }) }
+        }
     }
 
     fun deleteLayer(layerId: Long) {
@@ -852,6 +1259,14 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Returns a human-readable problem, or null if export can start. */
     private fun preflight(): String? {
+        if (overlayClips.any { !it.isImage }) {
+            return "PIP video is available in preview and timeline, but video-layer export is still being implemented. Remove the PIP video layer or export a project with PIP photos only."
+        }
+        overlayClips.forEach { layer ->
+            if (!canOpen(Uri.parse(layer.uriString))) {
+                return "The PIP file “${layer.name}” is no longer available. Remove it and add it again."
+            }
+        }
         clips.forEachIndexed { i, c ->
             if (!canOpen(c.uri)) return "Clip ${i + 1} is no longer available. Delete it or add it again."
         }
@@ -876,7 +1291,12 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             try {
-                runExport(requestId)
+                val voiceWaveforms = withContext(Dispatchers.IO) {
+                    audioTracks.filter { it.isVoiceover && !it.muted && (!audioTracks.any { a -> a.solo && !a.muted } || it.solo)}.mapNotNull { track ->
+                        Waveform.compute(ctx, track.uri)?.let { track.id to it }
+                    }.toMap()
+                }
+                runExport(requestId, voiceWaveforms)
             } catch (e: Exception) {
                 abandonExport(immediate = false)
                 if (exportTracker.finish(requestId)) {
@@ -887,10 +1307,17 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun runExport(requestId: Long) {
+    private fun runExport(requestId: Long, voiceWaveforms: Map<Long, FloatArray>) {
         val (w, h) = outputSize()
         val layout = if (fill) Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP else Presentation.LAYOUT_SCALE_TO_FIT
-        val comp = buildComposition(ctx, clips, Presentation.createForWidthAndHeight(w, h, layout), audioTracks, fps)
+        val noiseGatePoints = audioTracks.filter { it.isVoiceover && it.noiseGateEnabled && !it.muted && (!audioTracks.any { a -> a.solo && !a.muted } || it.solo)}.mapNotNull { track ->
+            val wave = voiceWaveforms[track.id] ?: return@mapNotNull null
+            track.id to buildTrimmedVoiceGatePoints(wave, track.trimStartMs, track.trimEndMs, track.noiseGateThreshold)
+        }.toMap()
+        val duckingPoints = audioTracks.filter { it.autoDuck && !it.isVoiceover && !it.muted && (!audioTracks.any { a -> a.solo && !a.muted } || it.solo)}.associate { track ->
+            track.id to buildVoiceDuckingPoints(audioTracks.filter { it.isVoiceover && !it.muted && (!audioTracks.any { a -> a.solo && !a.muted } || it.solo) }.map { VoiceoverActivity(it.id, it.offsetMs, it.trimStartMs, it.trimEndMs) }, voiceWaveforms, totalMs, track.offsetMs)
+        }
+        val comp = buildComposition(ctx, clips, Presentation.createForWidthAndHeight(w, h, layout), audioTracks, fps, overlayClips, duckingPoints, noiseGatePoints)
         val out = File(ctx.cacheDir, "export_${System.currentTimeMillis()}.mp4")
 
         val builder = Transformer.Builder(ctx)

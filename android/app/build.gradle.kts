@@ -43,7 +43,7 @@ android {
 }
 
 dependencies {
-    val media3 = "1.4.1"
+    val media3 = "1.5.1"
     implementation("androidx.media3:media3-exoplayer:$media3")
     implementation("androidx.media3:media3-transformer:$media3")
     implementation("androidx.media3:media3-effect:$media3")
@@ -58,4 +58,5 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
     implementation("androidx.core:core-ktx:1.13.1")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }

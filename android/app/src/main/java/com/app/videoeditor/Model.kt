@@ -26,6 +26,52 @@ data class Keyframe(
     val ease: Ease = Ease.Smooth
 )
 
+data class AudioGainPoint(val timeMs: Long, val gain: Float)
+
+/** Keeps floating-point export samples inside the normalized PCM range; non-finite DSP output is silenced. */
+fun clampPcmFloatSample(sample: Float): Float = if (sample.isFinite()) sample.coerceIn(-1f, 1f) else 0f
+
+
+/** Whether a track should contribute to playback/export under the current mute/solo state. */
+fun isAudioTrackAudible(muted: Boolean, solo: Boolean, anyUnmutedSolo: Boolean): Boolean =
+    !muted && (!anyUnmutedSolo || solo)
+
+/** Avoid needless player seeks while correcting timeline/audio drift before it becomes noticeable. */
+const val AUDIO_SYNC_DRIFT_THRESHOLD_MS = 120L
+
+fun shouldResyncAudioPlayer(currentPositionMs: Long, targetPositionMs: Long, force: Boolean = false): Boolean =
+    force || kotlin.math.abs(currentPositionMs - targetPositionMs) > AUDIO_SYNC_DRIFT_THRESHOLD_MS
+
+/** Combines preview gain stages; preserves up to 4x gain (2x track volume × 2x automation). */
+fun combinedPreviewAudioGain(
+    volume: Float,
+    fade: Float,
+    automation: Float,
+    ducking: Float,
+    noiseGate: Float,
+    audible: Boolean
+): Float = if (!audible) 0f else
+    (volume * fade * automation * ducking * noiseGate).takeIf { it.isFinite() }?.coerceIn(0f, 4f) ?: 0f
+
+/** Moves a track ID one position in the visible audio-track order; boundaries are no-ops. */
+fun duplicateAudioTrackName(name: String): String = "$name copy"
+
+fun normalizedAudioTrackName(name: String): String = name.trim().take(80)
+
+fun duplicateAudioTrack(track: AudioTrack, newId: Long): AudioTrack =
+    track.copy(id = newId, name = duplicateAudioTrackName(track.name))
+
+fun moveAudioTrackId(ids: List<Long>, id: Long, direction: Int): List<Long> {
+    if (direction != -1 && direction != 1) return ids
+    val from = ids.indexOf(id)
+    val to = from + direction
+    if (from < 0 || to !in ids.indices) return ids
+    return ids.toMutableList().also { list ->
+        val item = list.removeAt(from)
+        list.add(to, item)
+    }
+}
+
 data class AudioTrack(
     val id: Long,
     val uri: Uri,
@@ -33,10 +79,247 @@ data class AudioTrack(
     val volume: Float = 1f,
     val offsetMs: Long = 0L,
     val trimStartMs: Long = 0L,
-    val loop: Boolean = false
+    val loop: Boolean = false,
+    /** Source-media end in milliseconds; Long.MAX_VALUE preserves legacy full-source behavior. */
+    val trimEndMs: Long = Long.MAX_VALUE,
+    val fadeInMs: Long = 0L,
+    val fadeOutMs: Long = 0L,
+    val gainPoints: List<AudioGainPoint> = emptyList(),
+    val isVoiceover: Boolean = false,
+    val autoDuck: Boolean = false,
+    val noiseGateEnabled: Boolean = false,
+    val noiseGateThreshold: Float = 0.04f,
+    val muted: Boolean = false,
+    val solo: Boolean = false,
+    /** Five project EQ bands in dB: 60, 230, 910, 3600 and 14000 Hz. */
+    val eqGainsDb: List<Float> = List(AudioEqualizerProcessor.BAND_COUNT) { 0f }
 )
 
 fun trimmedDurationMs(startMs: Long, endMs: Long): Long = (endMs - startMs).coerceAtLeast(0L)
+
+data class AudioCrossfadeState(
+    val id: Long,
+    val offsetMs: Long,
+    val trimStartMs: Long,
+    val trimEndMs: Long,
+    val fadeInMs: Long,
+    val fadeOutMs: Long,
+    val loop: Boolean
+)
+
+/** Pure timeline calculation so crossfade behavior can be tested without Android Uri. */
+fun configureAudioCrossfade(
+    tracks: List<AudioCrossfadeState>,
+    outgoingId: Long,
+    sourceDurationsMs: Map<Long, Long>,
+    requestedMs: Long
+): List<AudioCrossfadeState> {
+    if (requestedMs <= 0L) return tracks
+    val ordered = tracks.sortedWith(compareBy<AudioCrossfadeState> { it.offsetMs }.thenBy { it.id })
+    val index = ordered.indexOfFirst { it.id == outgoingId }
+    if (index < 0 || index >= ordered.lastIndex) return tracks
+    val outgoing = ordered[index]
+    val incoming = ordered[index + 1]
+    val outgoingDuration = sourceDurationsMs[outgoing.id] ?: return tracks
+    val incomingDuration = sourceDurationsMs[incoming.id] ?: return tracks
+    val outgoingEndSource = minOf(outgoing.trimEndMs, outgoingDuration)
+    val outgoingAvailable = (outgoingEndSource - outgoing.trimStartMs).coerceAtLeast(0L)
+    val incomingAvailable = (minOf(incoming.trimEndMs, incomingDuration) - incoming.trimStartMs).coerceAtLeast(0L)
+    val fadeMs = minOf(requestedMs, outgoingAvailable, incomingAvailable)
+    if (fadeMs <= 0L) return tracks
+    val outgoingEndTimeline = outgoing.offsetMs + outgoingAvailable
+    val incomingStart = (outgoingEndTimeline - fadeMs).coerceAtLeast(outgoing.offsetMs)
+    return tracks.map { track ->
+        when (track.id) {
+            outgoing.id -> track.copy(trimEndMs = outgoingEndSource, fadeOutMs = fadeMs, loop = false)
+            incoming.id -> track.copy(offsetMs = incomingStart, fadeInMs = fadeMs, loop = false)
+            else -> track
+        }
+    }
+}
+
+fun normalizedAudioTrimEndMs(trimEndMs: Long?, trimStartMs: Long): Long =
+    (trimEndMs ?: Long.MAX_VALUE).coerceAtLeast(trimStartMs + 1L)
+
+/** Duration of the selected audio source range that fits inside the project timeline. */
+fun audioTrackOutputDurationMs(
+    trimStartMs: Long,
+    trimEndMs: Long,
+    trackOffsetMs: Long,
+    projectDurationMs: Long
+): Long {
+    val start = trimStartMs.coerceAtLeast(0L)
+    val timelineRemaining = (projectDurationMs - trackOffsetMs).coerceAtLeast(0L)
+    val timelineEnd = if (Long.MAX_VALUE - start < timelineRemaining) Long.MAX_VALUE else start + timelineRemaining
+    return (minOf(trimEndMs, timelineEnd) - start).coerceAtLeast(0L)
+}
+
+fun audioFadeGainAt(elapsedMs: Long, durationMs: Long, fadeInMs: Long, fadeOutMs: Long): Float {
+    if (durationMs <= 0L) return 0f
+    val position = elapsedMs.coerceIn(0L, durationMs)
+    val requestedIn = fadeInMs.coerceAtLeast(0L)
+    val requestedOut = fadeOutMs.coerceAtLeast(0L)
+    // If both fades overlap, shorten them proportionally so they meet cleanly.
+    val requestedTotal = requestedIn.toDouble() + requestedOut.toDouble()
+    val scale = if (requestedTotal > durationMs.toDouble() && requestedTotal > 0.0) {
+        durationMs.toDouble() / requestedTotal
+    } else 1.0
+    val effectiveIn = requestedIn.toDouble() * scale
+    val effectiveOut = requestedOut.toDouble() * scale
+    val fadeInGain = if (effectiveIn > 0.0) (position.toDouble() / effectiveIn).coerceIn(0.0, 1.0) else 1.0
+    val remaining = (durationMs - position).toDouble()
+    val fadeOutGain = if (effectiveOut > 0.0) (remaining / effectiveOut).coerceIn(0.0, 1.0) else 1.0
+    return minOf(fadeInGain, fadeOutGain).toFloat()
+}
+
+/** Points must be sorted by time; project loading and editing normalize this once. */
+/** Moves one automation point by a timeline delta, keeping timestamps unique and non-negative. */
+fun moveAudioGainPoint(points: List<AudioGainPoint>, index: Int, deltaMs: Long): List<AudioGainPoint> {
+    if (index !in points.indices || deltaMs == 0L) return points
+    val occupied = points.filterIndexed { i, _ -> i != index }.map { it.timeMs }.toHashSet()
+    val current = points[index]
+    var target = when {
+        deltaMs < 0L -> if (deltaMs == Long.MIN_VALUE) 0L else (current.timeMs + deltaMs).coerceAtLeast(0L)
+        current.timeMs > Long.MAX_VALUE - deltaMs -> Long.MAX_VALUE
+        else -> current.timeMs + deltaMs
+    }
+    val step = if (deltaMs < 0L) -100L else 100L
+    while (target in occupied) {
+        if ((step < 0L && target < 100L) || (step > 0L && target > Long.MAX_VALUE - 100L)) return points
+        target += step
+    }
+    return points.mapIndexed { i, point -> if (i == index) point.copy(timeMs = target) else point }
+        .sortedBy { it.timeMs }
+}
+
+fun audioKeyframeGainAt(points: List<AudioGainPoint>, elapsedMs: Long): Float {
+    if (points.isEmpty()) return 1f
+    if (elapsedMs < points.first().timeMs) return 1f
+    if (elapsedMs >= points.last().timeMs) return points.last().gain.coerceIn(0f, 2f)
+    var low = 0
+    var high = points.lastIndex
+    while (low <= high) {
+        val mid = (low + high) ushr 1
+        if (points[mid].timeMs <= elapsedMs) low = mid + 1 else high = mid - 1
+    }
+    val a = points[high.coerceAtLeast(0)]
+    val b = points[low.coerceAtMost(points.lastIndex)]
+    val span = (b.timeMs - a.timeMs).coerceAtLeast(1L)
+    val fraction = (elapsedMs - a.timeMs).toFloat() / span
+    return (a.gain + (b.gain - a.gain) * fraction).coerceIn(0f, 2f)
+}
+
+/**
+ * Sequential cursor for real-time PCM processing. Audio sample timestamps move forward,
+ * so this avoids a binary search for every sample frame. Points must be sorted by time.
+ */
+class AudioGainEnvelopeCursor(private val points: List<AudioGainPoint>) {
+    private var lowerIndex = 0
+
+    fun gainAt(elapsedMs: Long): Float {
+        if (points.isEmpty() || elapsedMs < points.first().timeMs) return 1f
+        while (lowerIndex < points.lastIndex && elapsedMs >= points[lowerIndex + 1].timeMs) {
+            lowerIndex++
+        }
+        if (lowerIndex >= points.lastIndex) return points.last().gain.coerceIn(0f, 2f)
+        val a = points[lowerIndex]
+        val b = points[lowerIndex + 1]
+        val span = (b.timeMs - a.timeMs).coerceAtLeast(1L)
+        val fraction = (elapsedMs - a.timeMs).toFloat() / span
+        return (a.gain + (b.gain - a.gain) * fraction).coerceIn(0f, 2f)
+    }
+
+    fun reset() {
+        lowerIndex = 0
+    }
+}
+
+data class VoiceoverActivity(val id: Long, val offsetMs: Long, val trimStartMs: Long, val trimEndMs: Long)
+
+/**
+ * Builds a shared timeline ducking envelope from decoded voiceover waveform buckets.
+ * Waveform buckets are 100 ms; gain ramps down quickly on speech and releases more slowly.
+ * Returned point times are relative to the background track's timeline offset.
+ */
+fun buildVoiceDuckingPoints(
+    voiceovers: List<VoiceoverActivity>,
+    waveforms: Map<Long, FloatArray>,
+    totalMs: Long,
+    backgroundOffsetMs: Long,
+    bucketMs: Long = 100L,
+    speechThreshold: Float = 0.12f,
+    duckGain: Float = 0.28f
+): List<AudioGainPoint> {
+    if (voiceovers.isEmpty() || waveforms.isEmpty() || totalMs <= backgroundOffsetMs) return emptyList()
+    val stepMs = bucketMs.coerceAtLeast(20L)
+    var gain = 1f
+    val points = mutableListOf<AudioGainPoint>()
+    var time = 0L
+    while (time <= totalMs) {
+        val speechActive = voiceovers.any { voice ->
+            val elapsed = time - voice.offsetMs
+            if (elapsed < 0L) false else {
+                val peaks = waveforms[voice.id]
+                val sourceMs = voice.trimStartMs + elapsed
+                val index = (sourceMs / stepMs).toInt()
+                peaks != null && sourceMs < voice.trimEndMs && index in peaks.indices && peaks[index] >= speechThreshold
+            }
+        }
+        val target = if (speechActive) duckGain.coerceIn(0f, 1f) else 1f
+        val blend = if (target < gain) (stepMs.toFloat() / 150f).coerceIn(0f, 1f)
+                    else (stepMs.toFloat() / 500f).coerceIn(0f, 1f)
+        gain += (target - gain) * blend
+        if (time >= backgroundOffsetMs) points += AudioGainPoint(time - backgroundOffsetMs, gain)
+        time += stepMs
+    }
+    if (points.isNotEmpty() && points.last().timeMs < totalMs - backgroundOffsetMs) {
+        points += AudioGainPoint(totalMs - backgroundOffsetMs, 1f)
+    }
+    return points
+}
+
+
+/** Basic waveform voice gate: attenuates low-level buckets between phrases; not spectral denoising. */
+fun buildVoiceGatePoints(waveform: FloatArray, durationMs: Long, threshold: Float, bucketMs: Long = 100L, closedGain: Float = 0.08f): List<AudioGainPoint> {
+    if (waveform.isEmpty() || durationMs <= 0L) return emptyList()
+    val step = bucketMs.coerceAtLeast(20L)
+    var gain = 1f
+    val points = mutableListOf<AudioGainPoint>()
+    var time = 0L
+    while (time <= durationMs) {
+        val index = (time / step).toInt()
+        val active = index in waveform.indices && waveform[index] >= threshold.coerceIn(0.001f, 1f)
+        val target = if (active) 1f else closedGain.coerceIn(0f, 1f)
+        val blend = if (target < gain) (step.toFloat() / 80f).coerceIn(0f, 1f) else (step.toFloat() / 300f).coerceIn(0f, 1f)
+        gain += (target - gain) * blend
+        points += AudioGainPoint(time, gain)
+        time += step
+    }
+    if (points.last().timeMs < durationMs) points += AudioGainPoint(durationMs, closedGain.coerceIn(0f, 1f))
+    return points
+}
+
+
+/** Builds gate automation for the selected source trim; returned time starts at trimStartMs. */
+fun buildTrimmedVoiceGatePoints(
+    waveform: FloatArray,
+    trimStartMs: Long,
+    trimEndMs: Long,
+    threshold: Float,
+    bucketMs: Long = 100L
+): List<AudioGainPoint> {
+    val step = bucketMs.coerceAtLeast(20L)
+    val start = trimStartMs.coerceAtLeast(0L)
+    val end = minOf(trimEndMs, waveform.size * step)
+    if (end <= start || waveform.isEmpty()) return emptyList()
+    val duration = end - start
+    val count = (duration / step).toInt() + 1
+    val trimmed = FloatArray(count) { index ->
+        val sourceMs = start + index * step
+        waveform.getOrElse((sourceMs / step).toInt()) { 0f }
+    }
+    return buildVoiceGatePoints(trimmed, duration, threshold, step)
+}
 
 fun shouldDeleteStaleExportFile(fileName: String, lastModifiedMs: Long, cutoffMs: Long): Boolean =
     fileName.startsWith("export_") && lastModifiedMs < cutoffMs
@@ -93,6 +376,35 @@ data class TextLayer(
 
 data class ProjectInfo(val id: String, val name: String, val updated: Long, val clipCount: Int, val durationMs: Long)
 
+/** Pure validation keeps malformed clip metadata from poisoning project recovery. */
+fun isValidProjectClipMetadata(
+    id: Long,
+    uriString: String,
+    durationMs: Long,
+    width: Int,
+    height: Int,
+    startMs: Long,
+    endMs: Long,
+    speed: Float,
+    volume: Float,
+    zoom: Float,
+    adjustments: List<Float>
+): Boolean =
+    id > 0L &&
+        uriString.isNotBlank() &&
+        durationMs > 0L &&
+        width > 0 && height > 0 &&
+        startMs >= 0L && endMs > startMs && endMs <= durationMs &&
+        speed > 0f && speed.isFinite() &&
+        volume >= 0f && volume.isFinite() &&
+        zoom > 0f && zoom.isFinite() &&
+        adjustments.all { it.isFinite() }
+
+fun Clip.isValidProjectClip(): Boolean = isValidProjectClipMetadata(
+    id, uri.toString(), durationMs, width, height, startMs, endMs, speed, volume, zoom,
+    listOf(cropL, cropR, cropT, cropB, brightness, contrast, saturation, warmth, hue)
+)
+
 data class Clip(
     val id: Long,
     val uri: Uri,
@@ -123,7 +435,10 @@ data class Clip(
     val fadeInMs: Long = 0L,
     val fadeOutMs: Long = 0L,
     val layers: List<TextLayer> = emptyList(),
-    val keyframes: List<Keyframe> = emptyList()
+    val keyframes: List<Keyframe> = emptyList(),
+    val audioEqGainsDb: List<Float> = List(5) { 0f },
+    val audioFadeInMs: Long = 0L,
+    val audioFadeOutMs: Long = 0L
 ) {
     val trimmedMs: Long get() = trimmedDurationMs(startMs, endMs)
     val outputMs: Long get() = outputDurationMs(startMs, endMs, speed)
@@ -145,6 +460,8 @@ fun Clip.toJson(): JSONObject = JSONObject().apply {
     put("br", brightness.toDouble()); put("co", contrast.toDouble()); put("sa", saturation.toDouble())
     put("wa", warmth.toDouble()); put("hue", hue.toDouble())
     put("filter", filter.name); put("anim", anim.name); put("fin", fadeInMs); put("fout", fadeOutMs)
+    put("audioEq", JSONArray().apply { audioEqGainsDb.forEach { put(it.toDouble()) } })
+    put("audioFadeIn", audioFadeInMs.coerceAtLeast(0L)); put("audioFadeOut", audioFadeOutMs.coerceAtLeast(0L))
     put("kf", JSONArray().apply {
         keyframes.forEach { k ->
             put(JSONObject().apply {
@@ -210,17 +527,75 @@ fun clipFromJson(o: JSONObject): Clip {
         filter = runCatching { Filter.valueOf(o.getString("filter")) }.getOrDefault(Filter.None),
         anim = runCatching { Anim.valueOf(o.getString("anim")) }.getOrDefault(Anim.None),
         fadeInMs = o.optLong("fin", 0L), fadeOutMs = o.optLong("fout", 0L), layers = layers,
-        keyframes = kfs.sortedBy { it.t }
+        keyframes = kfs.sortedBy { it.t },
+        audioEqGainsDb = AudioEqualizerProcessor.normalizeGains(o.optJSONArray("audioEq")?.let { a -> (0 until a.length()).map { i -> a.optDouble(i, 0.0).toFloat() } } ?: emptyList()),
+        audioFadeInMs = o.optLong("audioFadeIn", 0L).coerceAtLeast(0L),
+        audioFadeOutMs = o.optLong("audioFadeOut", 0L).coerceAtLeast(0L)
     )
 }
 
 fun AudioTrack.toJson(): JSONObject = JSONObject().apply {
     put("id", id); put("uri", uri.toString()); put("name", name); put("vol", volume.toDouble())
-    put("off", offsetMs); put("trim", trimStartMs); put("loop", loop)
+    put("off", offsetMs); put("trim", trimStartMs); put("trimEnd", trimEndMs); put("loop", loop); put("fadeIn", fadeInMs); put("fadeOut", fadeOutMs); put("gainPoints", JSONArray().apply { gainPoints.forEach { put(JSONObject().put("time", it.timeMs).put("gain", it.gain.toDouble())) } }); put("voiceover", isVoiceover); put("autoDuck", autoDuck); put("noiseGate", noiseGateEnabled); put("noiseGateThreshold", noiseGateThreshold.toDouble()); put("muted", muted); put("solo", solo); put("eqGainsDb", JSONArray().apply { eqGainsDb.forEach { put(it.toDouble()) } })
 }
+
+/** Pure metadata validator so recovery rules can be regression-tested on the local JVM. */
+fun isValidProjectAudioTrackMetadata(
+    id: Long,
+    uriString: String,
+    name: String,
+    volume: Float = 1f,
+    offsetMs: Long = 0L,
+    trimStartMs: Long = 0L,
+    trimEndMs: Long = Long.MAX_VALUE,
+    fadeInMs: Long = 0L,
+    fadeOutMs: Long = 0L,
+    noiseGateThreshold: Float = 0.04f,
+    gainPoints: List<AudioGainPoint> = emptyList(),
+    eqGainsDb: List<Float> = List(AudioEqualizerProcessor.BAND_COUNT) { 0f }
+): Boolean =
+    id > 0L &&
+        uriString.isNotBlank() &&
+        name.isNotBlank() &&
+        volume.isFinite() && volume in 0f..2f &&
+        offsetMs >= 0L &&
+        trimStartMs >= 0L &&
+        trimEndMs > trimStartMs &&
+        fadeInMs >= 0L && fadeOutMs >= 0L &&
+        noiseGateThreshold.isFinite() && noiseGateThreshold in 0.001f..1f &&
+        gainPoints.all { it.timeMs >= 0L && it.gain.isFinite() && it.gain in 0f..2f } &&
+        eqGainsDb.size == AudioEqualizerProcessor.BAND_COUNT &&
+        eqGainsDb.all { it.isFinite() && it in -12f..12f }
+
+/** Reject malformed audio metadata before it enters the editable project state. */
+fun AudioTrack.isValidProjectAudioTrack(): Boolean = isValidProjectAudioTrackMetadata(
+    id = id,
+    uriString = uri.toString(),
+    name = name,
+    volume = volume,
+    offsetMs = offsetMs,
+    trimStartMs = trimStartMs,
+    trimEndMs = trimEndMs,
+    fadeInMs = fadeInMs,
+    fadeOutMs = fadeOutMs,
+    noiseGateThreshold = noiseGateThreshold,
+    gainPoints = gainPoints,
+    eqGainsDb = eqGainsDb
+)
 
 fun audioFromJson(o: JSONObject): AudioTrack = AudioTrack(
     id = o.getLong("id"), uri = Uri.parse(o.getString("uri")), name = o.optString("name", "Audio"),
     volume = o.optDouble("vol", 1.0).toFloat(), offsetMs = o.optLong("off", 0L),
-    trimStartMs = o.optLong("trim", 0L), loop = o.optBoolean("loop", false)
+    trimStartMs = o.optLong("trim", 0L), loop = o.optBoolean("loop", false),
+    trimEndMs = normalizedAudioTrimEndMs(if (o.has("trimEnd")) o.optLong("trimEnd") else null, o.optLong("trim", 0L)),
+    fadeInMs = o.optLong("fadeIn", 0L).coerceAtLeast(0L),
+    fadeOutMs = o.optLong("fadeOut", 0L).coerceAtLeast(0L),
+    gainPoints = (o.optJSONArray("gainPoints")?.let { a -> (0 until a.length()).mapNotNull { i -> a.optJSONObject(i)?.let { AudioGainPoint(it.optLong("time", 0L).coerceAtLeast(0L), it.optDouble("gain", 1.0).toFloat().coerceIn(0f, 2f)) } } } ?: emptyList()).sortedBy { it.timeMs },
+    isVoiceover = o.optBoolean("voiceover", false),
+    autoDuck = o.optBoolean("autoDuck", false),
+    noiseGateEnabled = o.optBoolean("noiseGate", false),
+    noiseGateThreshold = o.optDouble("noiseGateThreshold", 0.04).toFloat().coerceIn(0.001f, 1f),
+    muted = o.optBoolean("muted", false),
+    solo = o.optBoolean("solo", false),
+    eqGainsDb = AudioEqualizerProcessor.normalizeGains(o.optJSONArray("eqGainsDb")?.let { a -> (0 until a.length()).map { i -> a.optDouble(i, 0.0).toFloat() } } ?: emptyList())
 )
