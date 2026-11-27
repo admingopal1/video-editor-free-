@@ -24,7 +24,7 @@ data class ToneCurve(
             Array(size) { g ->
                 IntArray(size) { b ->
                     val d = (size - 1).toFloat()
-                    val red = (sample(r / d) * 255f).toInt()
+                    val red = (sample(r / d) * 255f).roundToInt()
                     val green = (sample(g / d) * 255f).toInt()
                     val blue = (sample(b / d) * 255f).toInt()
                     (0xFF shl 24) or (red shl 16) or (green shl 8) or blue
