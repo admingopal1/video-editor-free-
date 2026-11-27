@@ -48,6 +48,27 @@ class OverlayClipTest {
     }
 
     @Test
+    fun projectAudioValidationRejectsCorruptTrackMetadata() {
+        val valid = AudioTrack(
+            id = 10L,
+            uri = android.net.Uri.parse("content://media/audio/10"),
+            name = "Music"
+        )
+        assertTrue(valid.isValidProjectAudioTrack())
+        assertFalse(valid.copy(id = 0L).isValidProjectAudioTrack())
+        assertFalse(valid.copy(name = " ").isValidProjectAudioTrack())
+        assertFalse(valid.copy(volume = Float.NaN).isValidProjectAudioTrack())
+        assertFalse(valid.copy(volume = 2.1f).isValidProjectAudioTrack())
+        assertFalse(valid.copy(offsetMs = -1L).isValidProjectAudioTrack())
+        assertFalse(valid.copy(trimStartMs = 500L, trimEndMs = 500L).isValidProjectAudioTrack())
+        assertFalse(valid.copy(fadeInMs = -1L).isValidProjectAudioTrack())
+        assertFalse(valid.copy(noiseGateThreshold = Float.POSITIVE_INFINITY).isValidProjectAudioTrack())
+        assertFalse(valid.copy(gainPoints = listOf(AudioGainPoint(-1L, 1f))).isValidProjectAudioTrack())
+        assertFalse(valid.copy(gainPoints = listOf(AudioGainPoint(100L, Float.NaN))).isValidProjectAudioTrack())
+        assertFalse(valid.copy(eqGainsDb = listOf(Float.NaN)).isValidProjectAudioTrack())
+    }
+
+    @Test
     fun projectDurationIgnoresInvalidSegmentsAndSaturatesOverflow() {
         val segments = listOf(
             Triple(0L, 10_000L, 2.0),
