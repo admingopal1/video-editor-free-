@@ -113,8 +113,8 @@ class PreviewMathTest {
         val l = layer(0.25f, 0.75f, TextAnim.None)
         assertFalse(textRender(l, total, 999_999).visible)
         assertTrue(textRender(l, total, 1_000_000).visible)
-        assertTrue(textRender(l, total, 3_000_000).visible)
-        assertFalse(textRender(l, total, 3_000_001).visible)
+        assertTrue(textRender(l, total, 2_999_999).visible)
+        assertFalse(textRender(l, total, 3_000_000).visible)
     }
 
     @Test
@@ -143,7 +143,7 @@ class PreviewMathTest {
         assertTrue(requiresTimedTextOverlay(malformed, 4_000L))
         assertTrue(textRender(malformed, total, 0L).visible)
         assertTrue(textRender(malformed, total, 1_999_999L).visible)
-        assertFalse(textRender(malformed, total, 2_000_001L).visible)
+        assertFalse(textRender(malformed, total, 2_000_000L).visible)
     }
 
     @Test
