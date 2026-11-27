@@ -752,13 +752,37 @@ private fun Timeline(
                                             Modifier.width(8.dp).fillMaxHeight().background(Pal.cyan)
                                                 .pointerInput(c.id, layer.id, dpPerSec) {
                                                     detectHorizontalDragGestures(
-                                                        onDragStart = { vm.selectClip(c.id); vm.selectedLayerId = layer.id },
-                                                        onDragEnd = { vm.onProjectChanged() },
+                                                        onDragStart = { vm.selectClip(c.id); vm.selectedLayerId = layer.id; snapGuideMs = null; lastSnapHapticMs = null },
+                                                        onDragEnd = { snapGuideMs = null; lastSnapHapticMs = null; vm.onProjectChanged() },
+                                                        onDragCancel = { snapGuideMs = null; lastSnapHapticMs = null },
                                                         onHorizontalDrag = { change, dragAmount ->
                                                             change.consume()
                                                             val deltaMs = (dragAmount / dpPerSec.coerceAtLeast(1f) * 1_000f).roundToLong()
-                                                            if (deltaMs != 0L) vm.updateLayer(layer.id) {
-                                                                trimTextLayerStart(it, c.outputMs, deltaMs)
+                                                            if (deltaMs != 0L) {
+                                                                val clipStartMs = vm.clips.take(i).fold(0L) { acc, item ->
+                                                                    if (Long.MAX_VALUE - acc < item.outputMs.coerceAtLeast(0L)) Long.MAX_VALUE else acc + item.outputMs.coerceAtLeast(0L)
+                                                                }
+                                                                val points = buildList {
+                                                                    add(0L); add(c.outputMs)
+                                                                    if (vm.timeMs >= clipStartMs && vm.timeMs - clipStartMs <= c.outputMs) add(vm.timeMs - clipStartMs)
+                                                                    var cursor = 0L
+                                                                    vm.clips.forEach { item ->
+                                                                        add((cursor - clipStartMs).coerceIn(0L, c.outputMs))
+                                                                        cursor = if (Long.MAX_VALUE - cursor < item.outputMs.coerceAtLeast(0L)) Long.MAX_VALUE else cursor + item.outputMs.coerceAtLeast(0L)
+                                                                    }
+                                                                }.distinct()
+                                                                var snapResult: TextLayerSnapResult? = null
+                                                                vm.updateLayer(layer.id) { current ->
+                                                                    snapResult = snapTextLayerTiming(current, c.outputMs, deltaMs, points,
+                                                                        ((8f / dpPerSec.coerceAtLeast(1f)) * 1_000f).roundToLong().coerceIn(60L, 500L),
+                                                                        TextLayerSnapMode.TRIM_START)
+                                                                    snapResult!!.layer
+                                                                }
+                                                                snapResult?.let { result ->
+                                                                    snapGuideMs = result.snappedToMs?.let { clipStartMs + it }
+                                                                    if (result.snappedToMs != null && result.snappedToMs != lastSnapHapticMs) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                                    lastSnapHapticMs = result.snappedToMs
+                                                                }
                                                             }
                                                         }
                                                     )
@@ -768,13 +792,37 @@ private fun Timeline(
                                             Modifier.weight(1f).fillMaxHeight()
                                                 .pointerInput(c.id, layer.id, dpPerSec) {
                                                     detectHorizontalDragGestures(
-                                                        onDragStart = { vm.selectClip(c.id); vm.selectedLayerId = layer.id },
-                                                        onDragEnd = { vm.onProjectChanged() },
+                                                        onDragStart = { vm.selectClip(c.id); vm.selectedLayerId = layer.id; snapGuideMs = null; lastSnapHapticMs = null },
+                                                        onDragEnd = { snapGuideMs = null; lastSnapHapticMs = null; vm.onProjectChanged() },
+                                                        onDragCancel = { snapGuideMs = null; lastSnapHapticMs = null },
                                                         onHorizontalDrag = { change, dragAmount ->
                                                             change.consume()
                                                             val deltaMs = (dragAmount / dpPerSec.coerceAtLeast(1f) * 1_000f).roundToLong()
-                                                            if (deltaMs != 0L) vm.updateLayer(layer.id) {
-                                                                moveTextLayerTiming(it, c.outputMs, deltaMs)
+                                                            if (deltaMs != 0L) {
+                                                                val clipStartMs = vm.clips.take(i).fold(0L) { acc, item ->
+                                                                    if (Long.MAX_VALUE - acc < item.outputMs.coerceAtLeast(0L)) Long.MAX_VALUE else acc + item.outputMs.coerceAtLeast(0L)
+                                                                }
+                                                                val points = buildList {
+                                                                    add(0L); add(c.outputMs)
+                                                                    if (vm.timeMs >= clipStartMs && vm.timeMs - clipStartMs <= c.outputMs) add(vm.timeMs - clipStartMs)
+                                                                    var cursor = 0L
+                                                                    vm.clips.forEach { item ->
+                                                                        add((cursor - clipStartMs).coerceIn(0L, c.outputMs))
+                                                                        cursor = if (Long.MAX_VALUE - cursor < item.outputMs.coerceAtLeast(0L)) Long.MAX_VALUE else cursor + item.outputMs.coerceAtLeast(0L)
+                                                                    }
+                                                                }.distinct()
+                                                                var snapResult: TextLayerSnapResult? = null
+                                                                vm.updateLayer(layer.id) { current ->
+                                                                    snapResult = snapTextLayerTiming(current, c.outputMs, deltaMs, points,
+                                                                        ((8f / dpPerSec.coerceAtLeast(1f)) * 1_000f).roundToLong().coerceIn(60L, 500L),
+                                                                        TextLayerSnapMode.MOVE)
+                                                                    snapResult!!.layer
+                                                                }
+                                                                snapResult?.let { result ->
+                                                                    snapGuideMs = result.snappedToMs?.let { clipStartMs + it }
+                                                                    if (result.snappedToMs != null && result.snappedToMs != lastSnapHapticMs) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                                    lastSnapHapticMs = result.snappedToMs
+                                                                }
                                                             }
                                                         }
                                                     )
@@ -788,13 +836,37 @@ private fun Timeline(
                                             Modifier.width(8.dp).fillMaxHeight().background(Pal.cyan)
                                                 .pointerInput(c.id, layer.id, dpPerSec) {
                                                     detectHorizontalDragGestures(
-                                                        onDragStart = { vm.selectClip(c.id); vm.selectedLayerId = layer.id },
-                                                        onDragEnd = { vm.onProjectChanged() },
+                                                        onDragStart = { vm.selectClip(c.id); vm.selectedLayerId = layer.id; snapGuideMs = null; lastSnapHapticMs = null },
+                                                        onDragEnd = { snapGuideMs = null; lastSnapHapticMs = null; vm.onProjectChanged() },
+                                                        onDragCancel = { snapGuideMs = null; lastSnapHapticMs = null },
                                                         onHorizontalDrag = { change, dragAmount ->
                                                             change.consume()
                                                             val deltaMs = (dragAmount / dpPerSec.coerceAtLeast(1f) * 1_000f).roundToLong()
-                                                            if (deltaMs != 0L) vm.updateLayer(layer.id) {
-                                                                trimTextLayerEnd(it, c.outputMs, deltaMs)
+                                                            if (deltaMs != 0L) {
+                                                                val clipStartMs = vm.clips.take(i).fold(0L) { acc, item ->
+                                                                    if (Long.MAX_VALUE - acc < item.outputMs.coerceAtLeast(0L)) Long.MAX_VALUE else acc + item.outputMs.coerceAtLeast(0L)
+                                                                }
+                                                                val points = buildList {
+                                                                    add(0L); add(c.outputMs)
+                                                                    if (vm.timeMs >= clipStartMs && vm.timeMs - clipStartMs <= c.outputMs) add(vm.timeMs - clipStartMs)
+                                                                    var cursor = 0L
+                                                                    vm.clips.forEach { item ->
+                                                                        add((cursor - clipStartMs).coerceIn(0L, c.outputMs))
+                                                                        cursor = if (Long.MAX_VALUE - cursor < item.outputMs.coerceAtLeast(0L)) Long.MAX_VALUE else cursor + item.outputMs.coerceAtLeast(0L)
+                                                                    }
+                                                                }.distinct()
+                                                                var snapResult: TextLayerSnapResult? = null
+                                                                vm.updateLayer(layer.id) { current ->
+                                                                    snapResult = snapTextLayerTiming(current, c.outputMs, deltaMs, points,
+                                                                        ((8f / dpPerSec.coerceAtLeast(1f)) * 1_000f).roundToLong().coerceIn(60L, 500L),
+                                                                        TextLayerSnapMode.TRIM_END)
+                                                                    snapResult!!.layer
+                                                                }
+                                                                snapResult?.let { result ->
+                                                                    snapGuideMs = result.snappedToMs?.let { clipStartMs + it }
+                                                                    if (result.snappedToMs != null && result.snappedToMs != lastSnapHapticMs) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                                    lastSnapHapticMs = result.snappedToMs
+                                                                }
                                                             }
                                                         }
                                                     )
@@ -803,6 +875,10 @@ private fun Timeline(
                                     }
                                 }
                             }
+                        }
+                        snapGuideMs?.let { guideMs ->
+                            val guideX = (guideMs / 1000f * dpPerSec).coerceIn(0f, totalDp)
+                            Box(Modifier.offset(x = guideX.dp).width(2.dp).fillMaxHeight().background(Color(0xFFFFD54F)))
                         }
                     }
                 }
