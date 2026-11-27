@@ -1155,9 +1155,33 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         selectedLayerId = layer.id
     }
 
+    private var layerTimingEditActive = false
+    private var layerTimingEditRecorded = false
+
+    /** Starts one undo transaction for a text/sticker timeline drag gesture. */
+    fun beginLayerTimingEdit() {
+        if (layerTimingEditActive) return
+        layerTimingEditActive = true
+        layerTimingEditRecorded = false
+    }
+
+    /** Ends the drag transaction; subsequent edits create their own undo entry. */
+    fun endLayerTimingEdit() {
+        layerTimingEditActive = false
+        layerTimingEditRecorded = false
+    }
+
     fun updateLayer(layerId: Long, f: (TextLayer) -> TextLayer) {
         val c = selected ?: return
-        update(c.id) { cl -> cl.copy(layers = cl.layers.map { if (it.id == layerId) f(it) else it }) }
+        if (layerTimingEditActive) {
+            if (!layerTimingEditRecorded) {
+                record(true)
+                layerTimingEditRecorded = true
+            }
+            clips = clips.map { if (it.id == c.id) it.copy(layers = it.layers.map { layer -> if (layer.id == layerId) f(layer) else layer }) else it }
+        } else {
+            update(c.id) { cl -> cl.copy(layers = cl.layers.map { if (it.id == layerId) f(it) else it }) }
+        }
     }
 
     fun deleteLayer(layerId: Long) {
