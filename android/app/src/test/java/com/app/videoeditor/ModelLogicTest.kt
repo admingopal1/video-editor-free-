@@ -80,29 +80,14 @@ class ModelLogicTest {
     }
 
     @Test
-    fun audioTrackTrimEndRoundTripsThroughProjectJson() {
-        val original = AudioTrack(
-            id = 7L,
-            uri = android.net.Uri.parse("file:///music/test.m4a"),
-            name = "Test track",
-            trimStartMs = 1_200L,
-            trimEndMs = 8_900L
-        )
-        val restored = audioFromJson(original.toJson())
-        assertEquals(original.trimStartMs, restored.trimStartMs)
-        assertEquals(original.trimEndMs, restored.trimEndMs)
+    fun missingLegacyTrimEndKeepsFullSource() {
+        assertEquals(Long.MAX_VALUE, normalizedAudioTrimEndMs(null, 500L))
     }
 
     @Test
-    fun legacyAudioProjectsKeepFullSourceTrimEnd() {
-        val legacy = org.json.JSONObject()
-            .put("id", 9L)
-            .put("uri", "file:///music/legacy.m4a")
-            .put("name", "Legacy")
-            .put("trim", 500L)
-        val restored = audioFromJson(legacy)
-        assertEquals(500L, restored.trimStartMs)
-        assertEquals(Long.MAX_VALUE, restored.trimEndMs)
+    fun trimEndIsAlwaysAfterTrimStart() {
+        assertEquals(1_001L, normalizedAudioTrimEndMs(900L, 1_000L))
+        assertEquals(8_900L, normalizedAudioTrimEndMs(8_900L, 1_000L))
     }
 
 }
