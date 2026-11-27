@@ -1660,12 +1660,7 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
                         AudioCrossfadeState(track.id, track.offsetMs, track.trimStartMs, track.trimEndMs, track.fadeInMs, track.fadeOutMs, track.loop)
                     }
                     val updated = configureAudioCrossfade(states, t.id, durations, (crossfadeDurationSeconds * 1000f).toLong()).associateBy { it.id }
-                    vm.audioTracks.forEach { original ->
-                        val changed = updated[original.id] ?: return@forEach
-                        if (changed != AudioCrossfadeState(original.id, original.offsetMs, original.trimStartMs, original.trimEndMs, original.fadeInMs, original.fadeOutMs, original.loop)) {
-                            vm.updateAudio(original.id) { it.copy(offsetMs = changed.offsetMs, trimEndMs = changed.trimEndMs, fadeInMs = changed.fadeInMs, fadeOutMs = changed.fadeOutMs, loop = changed.loop) }
-                        }
-                    }
+                    vm.applyAudioCrossfade(updated)
                 }, enabled = canCrossfade, modifier = Modifier.fillMaxWidth()) {
                     Text(if (canCrossfade) "Apply ${String.format(Locale.US, "%.1f", crossfadeDurationSeconds)}s crossfade into next track" else "Load both waveforms to enable crossfade")
                 }
