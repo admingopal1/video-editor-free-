@@ -51,4 +51,28 @@ class OverlaySnapTest {
             snapOverlayTimelineStart(2_000L, 1_000L, 10_000L, listOf(2_000L), -1L)
         )
     }
+
+    @Test
+    fun dragDeltasAccumulateFromLatestPosition() {
+        val first = calculateOverlayDragPosition(1_000L, 250L, 10_000L)
+        val second = calculateOverlayDragPosition(first, 250L, 10_000L)
+        assertEquals(1_500L, second)
+    }
+
+    @Test
+    fun dragPositionClampsAtTimelineEdges() {
+        assertEquals(0L, calculateOverlayDragPosition(100L, -500L, 10_000L))
+        assertEquals(10_000L, calculateOverlayDragPosition(9_900L, 500L, 10_000L))
+    }
+
+    @Test
+    fun dragPositionHandlesLongOverflow() {
+        assertEquals(Long.MAX_VALUE, calculateOverlayDragPosition(Long.MAX_VALUE - 2L, 10L, Long.MAX_VALUE))
+        assertEquals(0L, calculateOverlayDragPosition(2L, Long.MIN_VALUE, Long.MAX_VALUE))
+    }
+
+    @Test
+    fun negativeTimelineDurationProducesZeroPosition() {
+        assertEquals(0L, calculateOverlayDragPosition(5_000L, 100L, -1L))
+    }
 }
