@@ -131,6 +131,15 @@ class ModelLogicTest {
     }
 
     @Test
+    fun previewAudioGainCombinesFadeAutomationDuckingAndGate() {
+        assertEquals(0.1f, combinedPreviewAudioGain(0.8f, 0.5f, 0.5f, 0.5f, 1f, true), 0.0001f)
+        assertEquals(0f, combinedPreviewAudioGain(1f, 1f, 1f, 1f, 1f, false), 0.0001f)
+        assertEquals(1f, combinedPreviewAudioGain(2f, 1f, 1f, 1f, 1f, true), 0.0001f)
+        assertEquals(0f, combinedPreviewAudioGain(Float.NaN, 1f, 1f, 1f, 1f, true), 0.0001f)
+        assertEquals(0f, combinedPreviewAudioGain(1f, Float.POSITIVE_INFINITY, 1f, 1f, 1f, true), 0.0001f)
+    }
+
+    @Test
     fun audioPlayerResyncsOnlyAfterDriftThresholdOrWhenForced() {
         assertEquals(false, shouldResyncAudioPlayer(1_000L, 1_120L))
         assertEquals(true, shouldResyncAudioPlayer(1_000L, 1_121L))
