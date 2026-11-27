@@ -1244,8 +1244,18 @@ private fun ToolPanel(
             Slide("Saturation", c.saturation, -1f..1f, f2(c.saturation)) { v -> vm.update(id) { it.copy(saturation = v) } }
             Slide("Warmth", c.warmth, -1f..1f, f2(c.warmth)) { v -> vm.update(id) { it.copy(warmth = v) } }
             Slide("Hue", c.hue, -1f..1f, f2(c.hue)) { v -> vm.update(id) { it.copy(hue = v) } }
+            Text("RGB channel balance", fontWeight = FontWeight.SemiBold)
+            Text("Fine-tune red, green and blue independently. 100% is neutral.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            Slide("Red", c.redGain, 0.5f..1.5f, "${(c.redGain * 100).toInt()}%") { v -> vm.update(id) { it.copy(redGain = v) } }
+            Slide("Green", c.greenGain, 0.5f..1.5f, "${(c.greenGain * 100).toInt()}%") { v -> vm.update(id) { it.copy(greenGain = v) } }
+            Slide("Blue", c.blueGain, 0.5f..1.5f, "${(c.blueGain * 100).toInt()}%") { v -> vm.update(id) { it.copy(blueGain = v) } }
             OutlinedButton(onClick = {
-                vm.update(id) { it.copy(brightness = 0f, contrast = 0f, saturation = 0f, warmth = 0f, hue = 0f) }
+                vm.update(id) {
+                    it.copy(
+                        brightness = 0f, contrast = 0f, saturation = 0f, warmth = 0f, hue = 0f,
+                        redGain = 1f, greenGain = 1f, blueGain = 1f
+                    )
+                }
             }) { Text("Reset") }
         }
         Tool.Crop -> {
@@ -2080,6 +2090,9 @@ private fun imageFilter(c: Clip): ColorFilter {
     if (c.saturation != 0f) apply(saturation(1f + c.saturation))
     if (c.hue != 0f) apply(hue(c.hue * 180f))
     if (c.warmth != 0f) apply(scale(1f + 0.3f * c.warmth, 1f, 1f - 0.3f * c.warmth))
+    if (c.redGain != 1f || c.greenGain != 1f || c.blueGain != 1f) {
+        apply(scale(c.redGain, c.greenGain, c.blueGain))
+    }
     when (c.filter) {
         Filter.None -> {}
         Filter.Gray -> apply(saturation(0f))

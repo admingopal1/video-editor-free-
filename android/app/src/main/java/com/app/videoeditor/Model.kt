@@ -377,6 +377,9 @@ data class TextLayer(
 data class ProjectInfo(val id: String, val name: String, val updated: Long, val clipCount: Int, val durationMs: Long)
 
 /** Pure validation keeps malformed clip metadata from poisoning project recovery. */
+fun isValidColorChannelGain(red: Float, green: Float, blue: Float): Boolean =
+    listOf(red, green, blue).all { it.isFinite() && it in 0.5f..1.5f }
+
 fun isValidProjectClipMetadata(
     id: Long,
     uriString: String,
@@ -388,7 +391,10 @@ fun isValidProjectClipMetadata(
     speed: Float,
     volume: Float,
     zoom: Float,
-    adjustments: List<Float>
+    adjustments: List<Float>,
+    redGain: Float = 1f,
+    greenGain: Float = 1f,
+    blueGain: Float = 1f
 ): Boolean =
     id > 0L &&
         uriString.isNotBlank() &&
@@ -398,11 +404,13 @@ fun isValidProjectClipMetadata(
         speed > 0f && speed.isFinite() &&
         volume >= 0f && volume.isFinite() &&
         zoom > 0f && zoom.isFinite() &&
-        adjustments.all { it.isFinite() }
+        adjustments.all { it.isFinite() } &&
+        isValidColorChannelGain(redGain, greenGain, blueGain)
 
 fun Clip.isValidProjectClip(): Boolean = isValidProjectClipMetadata(
     id, uri.toString(), durationMs, width, height, startMs, endMs, speed, volume, zoom,
-    listOf(cropL, cropR, cropT, cropB, brightness, contrast, saturation, warmth, hue)
+    listOf(cropL, cropR, cropT, cropB, brightness, contrast, saturation, warmth, hue),
+    redGain, greenGain, blueGain
 )
 
 data class Clip(
@@ -430,6 +438,10 @@ data class Clip(
     val saturation: Float = 0f,
     val warmth: Float = 0f,
     val hue: Float = 0f,
+    /** Per-channel color balance gains; 1.0 is neutral. */
+    val redGain: Float = 1f,
+    val greenGain: Float = 1f,
+    val blueGain: Float = 1f,
     val filter: Filter = Filter.None,
     val anim: Anim = Anim.None,
     val fadeInMs: Long = 0L,
@@ -459,6 +471,7 @@ fun Clip.toJson(): JSONObject = JSONObject().apply {
     put("cl", cropL.toDouble()); put("cr", cropR.toDouble()); put("ct", cropT.toDouble()); put("cb", cropB.toDouble())
     put("br", brightness.toDouble()); put("co", contrast.toDouble()); put("sa", saturation.toDouble())
     put("wa", warmth.toDouble()); put("hue", hue.toDouble())
+    put("rg", redGain.toDouble()); put("gg", greenGain.toDouble()); put("bgain", blueGain.toDouble())
     put("filter", filter.name); put("anim", anim.name); put("fin", fadeInMs); put("fout", fadeOutMs)
     put("audioEq", JSONArray().apply { audioEqGainsDb.forEach { put(it.toDouble()) } })
     put("audioFadeIn", audioFadeInMs.coerceAtLeast(0L)); put("audioFadeOut", audioFadeOutMs.coerceAtLeast(0L))
@@ -524,6 +537,9 @@ fun clipFromJson(o: JSONObject): Clip {
         brightness = o.optDouble("br", 0.0).toFloat(), contrast = o.optDouble("co", 0.0).toFloat(),
         saturation = o.optDouble("sa", 0.0).toFloat(), warmth = o.optDouble("wa", 0.0).toFloat(),
         hue = o.optDouble("hue", 0.0).toFloat(),
+        redGain = o.optDouble("rg", 1.0).toFloat(),
+        greenGain = o.optDouble("gg", 1.0).toFloat(),
+        blueGain = o.optDouble("bgain", 1.0).toFloat(),
         filter = runCatching { Filter.valueOf(o.getString("filter")) }.getOrDefault(Filter.None),
         anim = runCatching { Anim.valueOf(o.getString("anim")) }.getOrDefault(Anim.None),
         fadeInMs = o.optLong("fin", 0L), fadeOutMs = o.optLong("fout", 0L), layers = layers,

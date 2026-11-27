@@ -278,6 +278,13 @@ private fun addColorEffects(l: MutableList<Effect>, c: Clip) {
             .setBlueScale(1f - 0.3f * c.warmth)
             .build()
     }
+    if (c.redGain != 1f || c.greenGain != 1f || c.blueGain != 1f) {
+        l += RgbAdjustment.Builder()
+            .setRedScale(c.redGain)
+            .setGreenScale(c.greenGain)
+            .setBlueScale(c.blueGain)
+            .build()
+    }
     when (c.filter) {
         Filter.None -> {}
         Filter.Gray -> l += RgbFilter.createGrayscaleFilter()
