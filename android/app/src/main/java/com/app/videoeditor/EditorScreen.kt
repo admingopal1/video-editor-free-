@@ -1622,13 +1622,13 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
                     Text(if (canCrossfade) "Crossfade into next track · 2s" else "Load both waveforms to enable crossfade")
                 }
             }
-            if (t.loop && (t.fadeInMs > 0L || t.fadeOutMs > 0L || t.gainPoints.isNotEmpty())) {
-                Text("Looping is disabled while fades or volume automation are active.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            if (t.loop && (t.fadeInMs > 0L || t.fadeOutMs > 0L || t.gainPoints.isNotEmpty() || t.eqGainsDb.any { it != 0f })) {
+                Text("Looping is disabled while fades, volume automation or EQ processing are active.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
             }
             if (t.offsetMs == 0L) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Loop to fill the video", Modifier.weight(1f))
-                    Switch(checked = t.loop, onCheckedChange = { l -> vm.updateAudio(t.id) { it.copy(loop = l) } })
+                    Switch(checked = t.loop && t.eqGainsDb.all { it == 0f }, onCheckedChange = { l -> vm.updateAudio(t.id) { it.copy(loop = l && it.eqGainsDb.all { gain -> gain == 0f }) } })
                 }
             }
         }
