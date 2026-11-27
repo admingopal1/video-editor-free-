@@ -428,8 +428,8 @@ fun buildComposition(
         val loop = t.loop && t.fadeInMs == 0L && t.fadeOutMs == 0L && t.gainPoints.isEmpty() && t.eqGainsDb.all { it == 0f } && duckingPoints[t.id].isNullOrEmpty() && noiseGatePoints[t.id].isNullOrEmpty() && t.offsetMs == 0L && !loopUsed
         if (loop) loopUsed = true
         val clipping = MediaItem.ClippingConfiguration.Builder().setStartPositionMs(t.trimStartMs)
-        val timelineEnd = t.trimStartMs + (totalMs - t.offsetMs)
-        val effectiveEnd = minOf(t.trimEndMs, timelineEnd)
+        val effectiveDuration = audioTrackOutputDurationMs(t.trimStartMs, t.trimEndMs, t.offsetMs, totalMs)
+        val effectiveEnd = t.trimStartMs + effectiveDuration
         if (loop && t.trimEndMs != Long.MAX_VALUE) {
             clipping.setEndPositionMs(t.trimEndMs)
         } else if (!loop) {
