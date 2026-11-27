@@ -391,7 +391,9 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val overlayArray = o.optJSONArray("overlayClips")
         if (overlayArray != null) {
             for (i in 0 until overlayArray.length()) {
-                val overlay = overlayClipFromJson(overlayArray.optJSONObject(i) ?: continue) ?: run {
+                val overlayJson = overlayArray.optJSONObject(i)
+                val overlay = overlayJson?.let { overlayClipFromJson(it) }
+                if (overlay == null) {
                     dropped++
                     continue
                 }
