@@ -40,7 +40,9 @@ data class AudioTrack(
     val trimEndMs: Long = Long.MAX_VALUE,
     val fadeInMs: Long = 0L,
     val fadeOutMs: Long = 0L,
-    val gainPoints: List<AudioGainPoint> = emptyList()
+    val gainPoints: List<AudioGainPoint> = emptyList(),
+    val isVoiceover: Boolean = false,
+    val autoDuck: Boolean = false
 )
 
 fun trimmedDurationMs(startMs: Long, endMs: Long): Long = (endMs - startMs).coerceAtLeast(0L)
@@ -249,7 +251,7 @@ fun clipFromJson(o: JSONObject): Clip {
 
 fun AudioTrack.toJson(): JSONObject = JSONObject().apply {
     put("id", id); put("uri", uri.toString()); put("name", name); put("vol", volume.toDouble())
-    put("off", offsetMs); put("trim", trimStartMs); put("trimEnd", trimEndMs); put("loop", loop); put("fadeIn", fadeInMs); put("fadeOut", fadeOutMs); put("gainPoints", JSONArray().apply { gainPoints.forEach { put(JSONObject().put("time", it.timeMs).put("gain", it.gain.toDouble())) } })
+    put("off", offsetMs); put("trim", trimStartMs); put("trimEnd", trimEndMs); put("loop", loop); put("fadeIn", fadeInMs); put("fadeOut", fadeOutMs); put("gainPoints", JSONArray().apply { gainPoints.forEach { put(JSONObject().put("time", it.timeMs).put("gain", it.gain.toDouble())) } }); put("voiceover", isVoiceover); put("autoDuck", autoDuck)
 }
 
 fun audioFromJson(o: JSONObject): AudioTrack = AudioTrack(
@@ -259,5 +261,7 @@ fun audioFromJson(o: JSONObject): AudioTrack = AudioTrack(
     trimEndMs = normalizedAudioTrimEndMs(if (o.has("trimEnd")) o.optLong("trimEnd") else null, o.optLong("trim", 0L)),
     fadeInMs = o.optLong("fadeIn", 0L).coerceAtLeast(0L),
     fadeOutMs = o.optLong("fadeOut", 0L).coerceAtLeast(0L),
-    gainPoints = (o.optJSONArray("gainPoints")?.let { a -> (0 until a.length()).mapNotNull { i -> a.optJSONObject(i)?.let { AudioGainPoint(it.optLong("time", 0L).coerceAtLeast(0L), it.optDouble("gain", 1.0).toFloat().coerceIn(0f, 2f)) } } } ?: emptyList())
+    gainPoints = (o.optJSONArray("gainPoints")?.let { a -> (0 until a.length()).mapNotNull { i -> a.optJSONObject(i)?.let { AudioGainPoint(it.optLong("time", 0L).coerceAtLeast(0L), it.optDouble("gain", 1.0).toFloat().coerceIn(0f, 2f)) } } } ?: emptyList()),
+    isVoiceover = o.optBoolean("voiceover", false),
+    autoDuck = o.optBoolean("autoDuck", false)
 )
