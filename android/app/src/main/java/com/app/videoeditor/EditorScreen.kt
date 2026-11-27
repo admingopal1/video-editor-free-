@@ -1418,6 +1418,17 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
                 TextButton(onClick = { vm.removeAudio(t.id) }) { Text("Remove") }
             }
             Slide("Volume", t.volume, 0f..2f, "${(t.volume * 100).toInt()}%") { v -> vm.updateAudio(t.id) { it.copy(volume = v) } }
+            if (!t.isVoiceover) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Auto duck under voice-over", style = MaterialTheme.typography.bodyMedium)
+                        Text("Lowers this track while recorded narration is active.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+                    }
+                    Switch(checked = t.autoDuck, onCheckedChange = { enabled -> vm.updateAudio(t.id) { it.copy(autoDuck = enabled, loop = if (enabled) false else it.loop) } })
+                }
+            } else {
+                Text("🎙 Voice-over track", style = MaterialTheme.typography.labelMedium, color = Pal.textLo)
+            }
             Slide("Starts at", t.offsetMs / 1000f, 0f..total, String.format(Locale.US, "%.1fs", t.offsetMs / 1000f)) { v ->
                 vm.updateAudio(t.id) { it.copy(offsetMs = (v * 10).toLong() * 100L) }
             }

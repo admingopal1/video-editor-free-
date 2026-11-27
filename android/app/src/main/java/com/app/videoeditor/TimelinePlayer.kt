@@ -36,7 +36,8 @@ class TimelinePlayer(
     private val clipsProvider: () -> List<Clip>,
     private val audioProvider: () -> List<AudioTrack>,
     private val onClipChanged: (Clip) -> Unit,
-    private val decodePhoto: suspend (Clip) -> Bitmap?
+    private val decodePhoto: suspend (Clip) -> Bitmap?,
+    private val waveformProvider: (Uri) -> FloatArray? = { null }
 ) {
     val playerA: ExoPlayer = ExoPlayer.Builder(ctx).build()
     val playerB: ExoPlayer = ExoPlayer.Builder(ctx).build()
@@ -65,6 +66,8 @@ class TimelinePlayer(
     private var currentId = -1L
     private var lastAudioSync = 0L
     private val audioPlayers = HashMap<Long, ExoPlayer>()
+    private var duckingCacheKey = ""
+    private var duckingCache: Map<Long, List<AudioGainPoint>> = emptyMap()
 
     private val active: ExoPlayer get() = if (activeIsA) playerA else playerB
     private val standby: ExoPlayer get() = if (activeIsA) playerB else playerA
@@ -315,6 +318,15 @@ class TimelinePlayer(
         val tracks = audioProvider()
         val ids = tracks.map { it.id }.toSet()
         audioPlayers.keys.filter { it !in ids }.forEach { id -> audioPlayers.remove(id)?.release() }
+        val voiceovers = tracks.filter { it.isVoiceover }
+        val voiceWaveforms = voiceovers.mapNotNull { voice -> waveformProvider(voice.uri)?.let { voice.id to it } }.toMap()
+        val cacheKey = tracks.joinToString("|") { "${it.id}:${it.offsetMs}:${it.trimStartMs}:${it.isVoiceover}:${it.autoDuck}:${waveformProvider(it.uri)?.let { wave -> System.identityHashCode(wave) } ?: 0}" }
+        if (cacheKey != duckingCacheKey) {
+            duckingCacheKey = cacheKey
+            duckingCache = tracks.filter { it.autoDuck && !it.isVoiceover }.associate { track ->
+                track.id to buildVoiceDuckingPoints(voiceovers, voiceWaveforms, totalMs(), track.offsetMs)
+            }
+        }
         for (t in tracks) {
             val p = audioPlayers.getOrPut(t.id) {
                 ExoPlayer.Builder(ctx).build().also { ap ->
@@ -326,7 +338,8 @@ class TimelinePlayer(
             val elapsedMs = (timeMs - t.offsetMs).coerceAtLeast(0L)
             val fadeGain = audioFadeGainAt(elapsedMs, trackDurationMs, t.fadeInMs, t.fadeOutMs)
             val keyframeGain = audioKeyframeGainAt(t.gainPoints, elapsedMs)
-            p.volume = (t.volume * fadeGain * keyframeGain).coerceIn(0f, 1f)
+            val duckGain = audioKeyframeGainAt(duckingCache[t.id] ?: emptyList(), elapsedMs)
+            p.volume = (t.volume * fadeGain * keyframeGain * duckGain).coerceIn(0f, 1f)
             p.repeatMode = if (t.loop && t.fadeInMs == 0L && t.fadeOutMs == 0L && t.gainPoints.isEmpty() && t.offsetMs == 0L && t.trimEndMs == Long.MAX_VALUE) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
             val wanted = timeMs - t.offsetMs + t.trimStartMs
             val reachedTrimEnd = t.trimEndMs != Long.MAX_VALUE && wanted >= t.trimEndMs

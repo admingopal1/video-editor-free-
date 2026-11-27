@@ -383,7 +383,8 @@ fun buildComposition(
     presentation: Presentation,
     tracks: List<AudioTrack>,
     fps: Int = 0,
-    overlayLayers: List<OverlayClip> = emptyList()
+    overlayLayers: List<OverlayClip> = emptyList(),
+    duckingPoints: Map<Long, List<AudioGainPoint>> = emptyMap()
 ): Composition {
     var clipTimelineStartMs = 0L
     val items = clips.map { c ->
@@ -418,7 +419,7 @@ fun buildComposition(
             audioItems += EditedMediaItem.Builder(MediaItem.fromUri(Uri.fromFile(makeSilence(ctx, t.offsetMs))))
                 .setRemoveVideo(true).build()
         }
-        val loop = t.loop && t.fadeInMs == 0L && t.fadeOutMs == 0L && t.gainPoints.isEmpty() && t.offsetMs == 0L && !loopUsed
+        val loop = t.loop && t.fadeInMs == 0L && t.fadeOutMs == 0L && t.gainPoints.isEmpty() && duckingPoints[t.id].isNullOrEmpty() && t.offsetMs == 0L && !loopUsed
         if (loop) loopUsed = true
         val clipping = MediaItem.ClippingConfiguration.Builder().setStartPositionMs(t.trimStartMs)
         val timelineEnd = t.trimStartMs + (totalMs - t.offsetMs)
@@ -433,8 +434,8 @@ fun buildComposition(
             .setRemoveVideo(true)
              .setEffects(Effects(buildList {
                 if (t.volume != 1f) add(volumeProcessor(t.volume))
-                if (t.fadeInMs > 0L || t.fadeOutMs > 0L || t.gainPoints.isNotEmpty()) {
-                    add(AudioFadeProcessor(t.fadeInMs, t.fadeOutMs, (effectiveEnd - t.trimStartMs).coerceAtLeast(0L), t.gainPoints))
+                if (t.fadeInMs > 0L || t.fadeOutMs > 0L || t.gainPoints.isNotEmpty() || !duckingPoints[t.id].isNullOrEmpty()) {
+                    add(AudioFadeProcessor(t.fadeInMs, t.fadeOutMs, (effectiveEnd - t.trimStartMs).coerceAtLeast(0L), t.gainPoints, duckingPoints[t.id] ?: emptyList()))
                 }
             }, emptyList()))
             .build()

@@ -98,7 +98,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         clipsProvider = { clips },
         audioProvider = { audioTracks },
         onClipChanged = { c -> if (selectedId != c.id) selectedId = c.id },
-        decodePhoto = { c -> withContext(Dispatchers.IO) { decodeBitmap(c.uri, 1600) } }
+        decodePhoto = { c -> withContext(Dispatchers.IO) { decodeBitmap(c.uri, 1600) } },
+        waveformProvider = { waves[it.toString()] }
     )
     private var transformer: Transformer? = null
     private val exportTracker = ExportRequestTracker()
@@ -770,11 +771,11 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }.getOrNull() ?: uri.lastPathSegment ?: "Audio"
 
-    fun addAudio(uri: Uri, name: String? = null, offsetMs: Long = 0L) {
+    fun addAudio(uri: Uri, name: String? = null, offsetMs: Long = 0L, isVoiceover: Boolean = false) {
         if (audioTracks.size >= 4) { toast("Up to 4 audio tracks"); return }
         record(true)
-        val first = audioTracks.isEmpty() && offsetMs == 0L
-        audioTracks = audioTracks + AudioTrack(nextId++, uri, name ?: displayName(uri), loop = first, offsetMs = offsetMs)
+        val first = audioTracks.isEmpty() && offsetMs == 0L && !isVoiceover
+        audioTracks = audioTracks + AudioTrack(nextId++, uri, name ?: displayName(uri), loop = first, offsetMs = offsetMs, isVoiceover = isVoiceover)
         ensureWaveform(uri)
     }
 
@@ -831,7 +832,7 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         recorder = null; recording = false
         timeline.pause()
         val f = recordFile ?: return
-        if (f.exists() && f.length() > 1000) addAudio(Uri.fromFile(f), "Voiceover", recordOffsetMs) else toast("Recording was too short")
+        if (f.exists() && f.length() > 1000) addAudio(Uri.fromFile(f), "Voiceover", recordOffsetMs, isVoiceover = true) else toast("Recording was too short")
     }
 
     // ---------- keyframes, transitions, speed ramps ----------
@@ -1025,7 +1026,12 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             try {
-                runExport(requestId)
+                val voiceWaveforms = withContext(Dispatchers.IO) {
+                    audioTracks.filter { it.isVoiceover }.mapNotNull { track ->
+                        Waveform.compute(ctx, track.uri)?.let { track.id to it }
+                    }.toMap()
+                }
+                runExport(requestId, voiceWaveforms)
             } catch (e: Exception) {
                 abandonExport(immediate = false)
                 if (exportTracker.finish(requestId)) {
@@ -1036,10 +1042,13 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun runExport(requestId: Long) {
+    private fun runExport(requestId: Long, voiceWaveforms: Map<Long, FloatArray>) {
         val (w, h) = outputSize()
         val layout = if (fill) Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP else Presentation.LAYOUT_SCALE_TO_FIT
-        val comp = buildComposition(ctx, clips, Presentation.createForWidthAndHeight(w, h, layout), audioTracks, fps, overlayClips)
+        val duckingPoints = audioTracks.filter { it.autoDuck && !it.isVoiceover }.associate { track ->
+            track.id to buildVoiceDuckingPoints(audioTracks.filter { it.isVoiceover }, voiceWaveforms, totalMs, track.offsetMs)
+        }
+        val comp = buildComposition(ctx, clips, Presentation.createForWidthAndHeight(w, h, layout), audioTracks, fps, overlayClips, duckingPoints)
         val out = File(ctx.cacheDir, "export_${System.currentTimeMillis()}.mp4")
 
         val builder = Transformer.Builder(ctx)
