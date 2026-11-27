@@ -209,7 +209,7 @@ class TimelinePlayer(
             if (ended) advance(i, clips)
             else if (p.playbackState == Player.STATE_READY) setClock(start + (posMedia / c.speed).toLong().coerceAtMost(c.outputMs))
         }
-        if (SystemClock.uptimeMillis() - lastAudioSync > 300L) syncAudio(force = false)
+        if (SystemClock.uptimeMillis() - lastAudioSync > 40L) syncAudio(force = false)
     }
 
     private fun advance(i: Int, clips: List<Clip>) {
