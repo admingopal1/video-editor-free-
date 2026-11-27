@@ -249,6 +249,33 @@ fun EditorScreen(vm: EditorViewModel) {
 
     if (showProjects) ProjectsDialog(vm) { showProjects = false }
 
+    vm.overlayClips.firstOrNull { it.id == vm.selectedOverlayId }?.let { layer ->
+        AlertDialog(
+            onDismissRequest = { vm.selectedOverlayId = null },
+            title = { Text("PIP photo · ${layer.name}") },
+            text = {
+                Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                    Text("Size · ${(layer.scale * 100).toInt()}%")
+                    Slider(value = layer.scale, onValueChange = { v -> vm.updateOverlay(layer.id) { it.copy(scale = v) } }, valueRange = 0.1f..0.8f)
+                    Text("Horizontal · ${(layer.x * 100).toInt()}")
+                    Slider(value = layer.x, onValueChange = { v -> vm.updateOverlay(layer.id) { it.copy(x = v) } }, valueRange = -1f..1f)
+                    Text("Vertical · ${(layer.y * 100).toInt()}")
+                    Slider(value = layer.y, onValueChange = { v -> vm.updateOverlay(layer.id) { it.copy(y = v) } }, valueRange = -1f..1f)
+                    Text("Opacity · ${(layer.opacity * 100).toInt()}%")
+                    Slider(value = layer.opacity, onValueChange = { v -> vm.updateOverlay(layer.id) { it.copy(opacity = v) } }, valueRange = 0f..1f)
+                    Text("Rotation · ${layer.rotation.toInt()}°")
+                    Slider(value = layer.rotation, onValueChange = { v -> vm.updateOverlay(layer.id) { it.copy(rotation = v) } }, valueRange = -180f..180f)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { vm.selectedOverlayId = null }) { Text("Done") }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.removeOverlay(layer.id) }) { Text("Remove PIP", color = MaterialTheme.colorScheme.error) }
+            }
+        )
+    }
+
     // ---------- export dialog ----------
     when (val s = vm.export) {
         is ExportState.Idle -> {}
