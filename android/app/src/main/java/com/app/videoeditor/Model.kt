@@ -185,6 +185,28 @@ fun buildVoiceGatePoints(waveform: FloatArray, durationMs: Long, threshold: Floa
     return points
 }
 
+
+/** Builds gate automation for the selected source trim; returned time starts at trimStartMs. */
+fun buildTrimmedVoiceGatePoints(
+    waveform: FloatArray,
+    trimStartMs: Long,
+    trimEndMs: Long,
+    threshold: Float,
+    bucketMs: Long = 100L
+): List<AudioGainPoint> {
+    val step = bucketMs.coerceAtLeast(20L)
+    val start = trimStartMs.coerceAtLeast(0L)
+    val end = minOf(trimEndMs, waveform.size * step)
+    if (end <= start || waveform.isEmpty()) return emptyList()
+    val duration = end - start
+    val count = (duration / step).toInt() + 1
+    val trimmed = FloatArray(count) { index ->
+        val sourceMs = start + index * step
+        waveform.getOrElse((sourceMs / step).toInt()) { 0f }
+    }
+    return buildVoiceGatePoints(trimmed, duration, threshold, step)
+}
+
 fun shouldDeleteStaleExportFile(fileName: String, lastModifiedMs: Long, cutoffMs: Long): Boolean =
     fileName.startsWith("export_") && lastModifiedMs < cutoffMs
 

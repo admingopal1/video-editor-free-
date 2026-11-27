@@ -333,7 +333,7 @@ class TimelinePlayer(
             gateCacheKey = cacheKey
             gateCache = tracks.filter { it.isVoiceover && it.noiseGateEnabled }.mapNotNull { track ->
                 val wave = waveformProvider(track.uri) ?: return@mapNotNull null
-                track.id to buildVoiceGatePoints(wave, wave.size * 100L, track.noiseGateThreshold)
+                track.id to buildTrimmedVoiceGatePoints(wave, track.trimStartMs, track.trimEndMs, track.noiseGateThreshold)
             }.toMap()
         }
         for (t in tracks) {

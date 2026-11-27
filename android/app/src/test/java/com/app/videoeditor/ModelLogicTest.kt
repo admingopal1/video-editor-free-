@@ -6,6 +6,15 @@ import android.net.Uri
 
 class ModelLogicTest {
     @Test
+    fun voiceGateRespectsTrimStartAndEnd() {
+        val wave = floatArrayOf(0f, 0f, 0.9f, 0.9f, 0f, 0f)
+        val points = buildTrimmedVoiceGatePoints(wave, 200L, 400L, 0.1f)
+        assertEquals(0L, points.first().timeMs)
+        assertEquals(true, audioKeyframeGainAt(points, 0L) > 0.9f)
+        assertEquals(200L, points.last().timeMs)
+    }
+
+    @Test
     fun emptyKeyframesReturnNeutralFrameAtRequestedTime() {
         val result = interpKeyframes(emptyList(), 0.4f)
 
