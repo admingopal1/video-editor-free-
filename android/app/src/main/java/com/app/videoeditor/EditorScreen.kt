@@ -629,8 +629,11 @@ private fun Timeline(
                                                     // Read the latest state on every pointer event. The captured `layer`
                                                     // belongs to the initial composition and becomes stale during a drag.
                                                     vm.overlayClips.firstOrNull { it.id == layer.id }?.let { movingLayer ->
-                                                        val requestedStart = (movingLayer.timelineStartMs.toDouble() + deltaMs.toDouble())
-                                                            .coerceIn(0.0, totalDurationMs.toDouble()).toLong()
+                                                        val requestedStart = calculateOverlayDragPosition(
+                                                            currentStartMs = movingLayer.timelineStartMs,
+                                                            deltaMs = deltaMs,
+                                                            totalDurationMs = totalDurationMs
+                                                        )
                                                         val snapped = snapOverlayTimelineStart(
                                                             requestedStartMs = requestedStart,
                                                             durationMs = movingLayer.outputMs,
