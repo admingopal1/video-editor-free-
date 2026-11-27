@@ -315,7 +315,7 @@ sealed class ExportState {
 fun Clip.toJson(): JSONObject = JSONObject().apply {
     put("id", id); put("uri", uri.toString()); put("dur", durationMs); put("w", width); put("h", height)
     put("start", startMs); put("end", endMs); put("img", isImage)
-    put("speed", speed.toDouble()); put("vol", volume.toDouble()); put("muted", muted); put("solo", solo)
+    put("speed", speed.toDouble()); put("vol", volume.toDouble()); put("muted", muted); put("solo", solo); put("solo", solo)
     put("rot", rotation); put("fh", flipH); put("fv", flipV); put("zoom", zoom.toDouble())
     put("cl", cropL.toDouble()); put("cr", cropR.toDouble()); put("ct", cropT.toDouble()); put("cb", cropB.toDouble())
     put("br", brightness.toDouble()); put("co", contrast.toDouble()); put("sa", saturation.toDouble())
