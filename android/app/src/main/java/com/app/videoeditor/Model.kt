@@ -40,6 +40,9 @@ data class AudioTrack(
 
 fun trimmedDurationMs(startMs: Long, endMs: Long): Long = (endMs - startMs).coerceAtLeast(0L)
 
+fun normalizedAudioTrimEndMs(trimEndMs: Long?, trimStartMs: Long): Long =
+    (trimEndMs ?: Long.MAX_VALUE).coerceAtLeast(trimStartMs + 1L)
+
 fun shouldDeleteStaleExportFile(fileName: String, lastModifiedMs: Long, cutoffMs: Long): Boolean =
     fileName.startsWith("export_") && lastModifiedMs < cutoffMs
 
@@ -225,5 +228,5 @@ fun audioFromJson(o: JSONObject): AudioTrack = AudioTrack(
     id = o.getLong("id"), uri = Uri.parse(o.getString("uri")), name = o.optString("name", "Audio"),
     volume = o.optDouble("vol", 1.0).toFloat(), offsetMs = o.optLong("off", 0L),
     trimStartMs = o.optLong("trim", 0L), loop = o.optBoolean("loop", false),
-    trimEndMs = o.optLong("trimEnd", Long.MAX_VALUE).coerceAtLeast(o.optLong("trim", 0L) + 1L)
+    trimEndMs = normalizedAudioTrimEndMs(if (o.has("trimEnd")) o.optLong("trimEnd") else null, o.optLong("trim", 0L))
 )
