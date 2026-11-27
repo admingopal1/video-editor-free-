@@ -22,6 +22,7 @@ import android.text.style.BackgroundColorSpan
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import android.text.style.TypefaceSpan
+import androidx.media3.common.C
 import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.audio.AudioProcessor
@@ -413,9 +414,46 @@ fun buildComposition(
         }
         builder.setEffects(Effects(buildAudioProcessors(c), buildVideoEffects(c, presentation, true, fps, overlayLayers = overlayLayers, clipTimelineStartMs = clipStartMs, overlayContext = ctx))).build()
     }
-    val sequences = mutableListOf(EditedMediaItemSequence(items))
-
+    val primarySequence = EditedMediaItemSequence(items)
     val totalMs = clips.sumOf { it.outputMs }
+
+    // Media3 treats video gaps as black placeholder frames. The custom compositor
+    // hides those frames and fixes output dimensions to the primary sequence.
+    val pipVideoPlan = buildPipVideoCompositionPlan(
+        overlayLayers.filter { !it.isImage && it.timelineStartMs < totalMs }
+    )
+    val pipVideoSequences = pipVideoPlan.videoInputs.map { input ->
+        val layer = input.layer
+        val sequenceBuilder = EditedMediaItemSequence.Builder(setOf(C.TRACK_TYPE_VIDEO))
+        if (layer.timelineStartMs > 0L) {
+            sequenceBuilder.addGap(pipMillisToUs(layer.timelineStartMs))
+        }
+        val overlayMediaItem = MediaItem.Builder()
+            .setUri(layer.uriString)
+            .setClippingConfiguration(
+                MediaItem.ClippingConfiguration.Builder()
+                    .setStartPositionMs(layer.startMs)
+                    .setEndPositionMs(layer.endMs)
+                    .build()
+            )
+            .build()
+        val videoEffects = if (layer.speed != 1f) {
+            listOf(SpeedChangeEffect(layer.speed))
+        } else {
+            emptyList()
+        }
+        sequenceBuilder.addItem(
+            EditedMediaItem.Builder(overlayMediaItem)
+                .setRemoveAudio(true)
+                .setEffects(Effects(emptyList(), videoEffects))
+                .build()
+        )
+        val remainingMs = (totalMs - layer.timelineEndMs).coerceAtLeast(0L)
+        if (remainingMs > 0L) sequenceBuilder.addGap(pipMillisToUs(remainingMs))
+        sequenceBuilder.build()
+    }
+
+    val audioSequences = mutableListOf<EditedMediaItemSequence>()
     var loopUsed = false
     val soloActive = tracks.any { it.solo && !it.muted }
     for (t in tracks) {
@@ -446,9 +484,20 @@ fun buildComposition(
                 }
             }, emptyList()))
             .build()
-        sequences += EditedMediaItemSequence(audioItems, loop)
+        audioSequences += EditedMediaItemSequence(audioItems, loop)
     }
-    return Composition.Builder(sequences)
+    val sequences = buildList {
+        addAll(pipVideoSequences)
+        add(primarySequence)
+        addAll(audioSequences)
+    }
+    val compositionBuilder = Composition.Builder(sequences)
         .experimentalSetForceAudioTrack(true)
-        .build()
+    if (pipVideoPlan.videoInputs.isNotEmpty()) {
+        compositionBuilder.setVideoCompositorSettings(PipVideoCompositorSettings(pipVideoPlan))
+    }
+    return compositionBuilder.build()
 }
+
+private fun pipMillisToUs(valueMs: Long): Long =
+    if (valueMs > Long.MAX_VALUE / 1_000L) Long.MAX_VALUE else valueMs * 1_000L
