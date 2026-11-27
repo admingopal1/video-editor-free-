@@ -334,6 +334,10 @@ private fun addColorEffects(l: MutableList<Effect>, c: Clip, context: Context? =
             ).toMedia3ArgbCube()
         )
     }
+    val hslAdjustments = listOf(c.hslRed, c.hslOrange, c.hslYellow, c.hslGreen, c.hslAqua, c.hslBlue, c.hslPurple, c.hslMagenta)
+    if (hslAdjustments.any { it != 0f }) {
+        l += SingleColorLut.createFromCube(HslMixer(hslAdjustments).toMedia3ArgbCube())
+    }
     c.lutUri?.let { uriString ->
         try {
             val ctx = context ?: throw IllegalStateException("LUT context is unavailable")

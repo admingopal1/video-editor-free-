@@ -1278,6 +1278,31 @@ private fun ToolPanel(
             Text("Highlights", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
             Slide("Highlight temperature", c.highlightsTemperature, -1f..1f, f2(c.highlightsTemperature)) { v -> vm.update(id) { it.copy(highlightsTemperature = v) } }
             Slide("Highlight tint", c.highlightsTint, -1f..1f, f2(c.highlightsTint)) { v -> vm.update(id) { it.copy(highlightsTint = v) } }
+            Text("HSL color mixer", fontWeight = FontWeight.SemiBold)
+            Text("Adjust saturation by color family with smooth hue transitions. GPU processing is available for video clips.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            if (!c.isImage) {
+                listOf(
+                    "Red" to c.hslRed, "Orange" to c.hslOrange, "Yellow" to c.hslYellow, "Green" to c.hslGreen,
+                    "Aqua" to c.hslAqua, "Blue" to c.hslBlue, "Purple" to c.hslPurple, "Magenta" to c.hslMagenta
+                ).forEachIndexed { index, entry ->
+                    Slide(entry.first, entry.second, -1f..1f, String.format(Locale.US, "%+.0f%%", entry.second * 100f)) { value ->
+                        vm.update(id) { clip ->
+                            when (index) {
+                                0 -> clip.copy(hslRed = value)
+                                1 -> clip.copy(hslOrange = value)
+                                2 -> clip.copy(hslYellow = value)
+                                3 -> clip.copy(hslGreen = value)
+                                4 -> clip.copy(hslAqua = value)
+                                5 -> clip.copy(hslBlue = value)
+                                6 -> clip.copy(hslPurple = value)
+                                else -> clip.copy(hslMagenta = value)
+                            }
+                        }
+                    }
+                }
+            } else {
+                Text("HSL mixer is currently available for video clips; photo support will be added with matching preview processing.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            }
             Text("3D color LUT", fontWeight = FontWeight.SemiBold)
             Text("Import a .cube look-up table for GPU-based video grading. LUTs are stored with the project; photos are not supported in this first integration.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1298,7 +1323,9 @@ private fun ToolPanel(
                         toneShadows = 0f, toneMidtones = 0f, toneHighlights = 0f,
                         shadowsTemperature = 0f, shadowsTint = 0f,
                         midtonesTemperature = 0f, midtonesTint = 0f,
-                        highlightsTemperature = 0f, highlightsTint = 0f
+                        highlightsTemperature = 0f, highlightsTint = 0f,
+                        hslRed = 0f, hslOrange = 0f, hslYellow = 0f, hslGreen = 0f,
+                        hslAqua = 0f, hslBlue = 0f, hslPurple = 0f, hslMagenta = 0f
                     )
                 }
             }) { Text("Reset") }

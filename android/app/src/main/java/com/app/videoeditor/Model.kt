@@ -385,6 +385,9 @@ fun isValidTint(tint: Float): Boolean = tint.isFinite() && tint in -1f..1f
 fun isValidToneCurve(shadows: Float, midtones: Float, highlights: Float): Boolean =
     listOf(shadows, midtones, highlights).all { it.isFinite() && it in -0.2f..0.2f }
 
+fun isValidHslMixer(adjustments: List<Float>): Boolean =
+    adjustments.size == 8 && adjustments.all { it.isFinite() && it in -1f..1f }
+
 fun isValidColorWheels(
     shadowsTemperature: Float, shadowsTint: Float,
     midtonesTemperature: Float, midtonesTint: Float,
@@ -415,7 +418,8 @@ fun isValidProjectClipMetadata(
     midtonesTemperature: Float = 0f,
     midtonesTint: Float = 0f,
     highlightsTemperature: Float = 0f,
-    highlightsTint: Float = 0f
+    highlightsTint: Float = 0f,
+    hslMixer: List<Float> = List(8) { 0f }
 ): Boolean =
     id > 0L &&
         uriString.isNotBlank() &&
@@ -428,13 +432,15 @@ fun isValidProjectClipMetadata(
         adjustments.all { it.isFinite() } &&
         isValidColorChannelGain(redGain, greenGain, blueGain) &&
         isValidTint(tint) &&
-        isValidColorWheels(shadowsTemperature, shadowsTint, midtonesTemperature, midtonesTint, highlightsTemperature, highlightsTint)
+        isValidColorWheels(shadowsTemperature, shadowsTint, midtonesTemperature, midtonesTint, highlightsTemperature, highlightsTint) &&
+        isValidHslMixer(hslMixer)
 
 fun Clip.isValidProjectClip(): Boolean = isValidProjectClipMetadata(
     id, uri.toString(), durationMs, width, height, startMs, endMs, speed, volume, zoom,
     listOf(cropL, cropR, cropT, cropB, brightness, contrast, saturation, warmth, hue),
     redGain, greenGain, blueGain, tint,
-    shadowsTemperature, shadowsTint, midtonesTemperature, midtonesTint, highlightsTemperature, highlightsTint
+    shadowsTemperature, shadowsTint, midtonesTemperature, midtonesTint, highlightsTemperature, highlightsTint,
+    listOf(hslRed, hslOrange, hslYellow, hslGreen, hslAqua, hslBlue, hslPurple, hslMagenta)
 )
 
 data class Clip(
@@ -479,6 +485,15 @@ data class Clip(
     val midtonesTint: Float = 0f,
     val highlightsTemperature: Float = 0f,
     val highlightsTint: Float = 0f,
+    /** Per-hue saturation offsets; zero is neutral. Order: red, orange, yellow, green, aqua, blue, purple, magenta. */
+    val hslRed: Float = 0f,
+    val hslOrange: Float = 0f,
+    val hslYellow: Float = 0f,
+    val hslGreen: Float = 0f,
+    val hslAqua: Float = 0f,
+    val hslBlue: Float = 0f,
+    val hslPurple: Float = 0f,
+    val hslMagenta: Float = 0f,
     /** Persisted document URI for an optional 3D .cube color LUT. */
     val lutUri: String? = null,
     val filter: Filter = Filter.None,
@@ -514,6 +529,10 @@ fun Clip.toJson(): JSONObject = JSONObject().apply {
     put("shTemp", shadowsTemperature.toDouble()); put("shTint", shadowsTint.toDouble())
     put("midTemp", midtonesTemperature.toDouble()); put("midTint", midtonesTint.toDouble())
     put("hiTemp", highlightsTemperature.toDouble()); put("hiTint", highlightsTint.toDouble())
+    put("hslR", hslRed.toDouble()); put("hslO", hslOrange.toDouble())
+    put("hslY", hslYellow.toDouble()); put("hslG", hslGreen.toDouble())
+    put("hslA", hslAqua.toDouble()); put("hslB", hslBlue.toDouble())
+    put("hslP", hslPurple.toDouble()); put("hslM", hslMagenta.toDouble())
     put("lutUri", lutUri ?: JSONObject.NULL)
     put("filter", filter.name); put("anim", anim.name); put("fin", fadeInMs); put("fout", fadeOutMs)
     put("audioEq", JSONArray().apply { audioEqGainsDb.forEach { put(it.toDouble()) } })
@@ -593,6 +612,14 @@ fun clipFromJson(o: JSONObject): Clip {
         midtonesTint = o.optDouble("midTint", 0.0).toFloat(),
         highlightsTemperature = o.optDouble("hiTemp", 0.0).toFloat(),
         highlightsTint = o.optDouble("hiTint", 0.0).toFloat(),
+        hslRed = o.optDouble("hslR", 0.0).toFloat(),
+        hslOrange = o.optDouble("hslO", 0.0).toFloat(),
+        hslYellow = o.optDouble("hslY", 0.0).toFloat(),
+        hslGreen = o.optDouble("hslG", 0.0).toFloat(),
+        hslAqua = o.optDouble("hslA", 0.0).toFloat(),
+        hslBlue = o.optDouble("hslB", 0.0).toFloat(),
+        hslPurple = o.optDouble("hslP", 0.0).toFloat(),
+        hslMagenta = o.optDouble("hslM", 0.0).toFloat(),
         lutUri = o.optString("lutUri").takeIf { it.isNotBlank() && it != "null" },
         filter = runCatching { Filter.valueOf(o.getString("filter")) }.getOrDefault(Filter.None),
         anim = runCatching { Anim.valueOf(o.getString("anim")) }.getOrDefault(Anim.None),
