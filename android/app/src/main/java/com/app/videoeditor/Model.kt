@@ -35,13 +35,24 @@ data class AudioTrack(
     val trimStartMs: Long = 0L,
     val loop: Boolean = false,
     /** Source-media end in milliseconds; Long.MAX_VALUE preserves legacy full-source behavior. */
-    val trimEndMs: Long = Long.MAX_VALUE
+    val trimEndMs: Long = Long.MAX_VALUE,
+    val fadeInMs: Long = 0L,
+    val fadeOutMs: Long = 0L
 )
 
 fun trimmedDurationMs(startMs: Long, endMs: Long): Long = (endMs - startMs).coerceAtLeast(0L)
 
 fun normalizedAudioTrimEndMs(trimEndMs: Long?, trimStartMs: Long): Long =
     (trimEndMs ?: Long.MAX_VALUE).coerceAtLeast(trimStartMs + 1L)
+
+fun audioFadeGainAt(elapsedMs: Long, durationMs: Long, fadeInMs: Long, fadeOutMs: Long): Float {
+    if (durationMs <= 0L) return 0f
+    val position = elapsedMs.coerceIn(0L, durationMs)
+    val fadeInGain = if (fadeInMs > 0L) (position.toFloat() / fadeInMs).coerceIn(0f, 1f) else 1f
+    val remaining = durationMs - position
+    val fadeOutGain = if (fadeOutMs > 0L) (remaining.toFloat() / fadeOutMs).coerceIn(0f, 1f) else 1f
+    return minOf(fadeInGain, fadeOutGain)
+}
 
 fun shouldDeleteStaleExportFile(fileName: String, lastModifiedMs: Long, cutoffMs: Long): Boolean =
     fileName.startsWith("export_") && lastModifiedMs < cutoffMs
@@ -221,12 +232,14 @@ fun clipFromJson(o: JSONObject): Clip {
 
 fun AudioTrack.toJson(): JSONObject = JSONObject().apply {
     put("id", id); put("uri", uri.toString()); put("name", name); put("vol", volume.toDouble())
-    put("off", offsetMs); put("trim", trimStartMs); put("trimEnd", trimEndMs); put("loop", loop)
+    put("off", offsetMs); put("trim", trimStartMs); put("trimEnd", trimEndMs); put("loop", loop); put("fadeIn", fadeInMs); put("fadeOut", fadeOutMs)
 }
 
 fun audioFromJson(o: JSONObject): AudioTrack = AudioTrack(
     id = o.getLong("id"), uri = Uri.parse(o.getString("uri")), name = o.optString("name", "Audio"),
     volume = o.optDouble("vol", 1.0).toFloat(), offsetMs = o.optLong("off", 0L),
     trimStartMs = o.optLong("trim", 0L), loop = o.optBoolean("loop", false),
-    trimEndMs = normalizedAudioTrimEndMs(if (o.has("trimEnd")) o.optLong("trimEnd") else null, o.optLong("trim", 0L))
+    trimEndMs = normalizedAudioTrimEndMs(if (o.has("trimEnd")) o.optLong("trimEnd") else null, o.optLong("trim", 0L)),
+    fadeInMs = o.optLong("fadeIn", 0L).coerceAtLeast(0L),
+    fadeOutMs = o.optLong("fadeOut", 0L).coerceAtLeast(0L)
 )
