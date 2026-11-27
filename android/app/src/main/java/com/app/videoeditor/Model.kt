@@ -380,6 +380,9 @@ data class ProjectInfo(val id: String, val name: String, val updated: Long, val 
 fun isValidColorChannelGain(red: Float, green: Float, blue: Float): Boolean =
     listOf(red, green, blue).all { it.isFinite() && it in 0.5f..1.5f }
 
+fun isValidToneCurve(shadows: Float, midtones: Float, highlights: Float): Boolean =
+    listOf(shadows, midtones, highlights).all { it.isFinite() && it in -0.2f..0.2f }
+
 fun isValidProjectClipMetadata(
     id: Long,
     uriString: String,
@@ -442,6 +445,10 @@ data class Clip(
     val redGain: Float = 1f,
     val greenGain: Float = 1f,
     val blueGain: Float = 1f,
+    /** Master tonal curve control points; zero values preserve the identity curve. */
+    val toneShadows: Float = 0f,
+    val toneMidtones: Float = 0f,
+    val toneHighlights: Float = 0f,
     /** Persisted document URI for an optional 3D .cube color LUT. */
     val lutUri: String? = null,
     val filter: Filter = Filter.None,
@@ -473,7 +480,7 @@ fun Clip.toJson(): JSONObject = JSONObject().apply {
     put("cl", cropL.toDouble()); put("cr", cropR.toDouble()); put("ct", cropT.toDouble()); put("cb", cropB.toDouble())
     put("br", brightness.toDouble()); put("co", contrast.toDouble()); put("sa", saturation.toDouble())
     put("wa", warmth.toDouble()); put("hue", hue.toDouble())
-    put("rg", redGain.toDouble()); put("gg", greenGain.toDouble()); put("bgain", blueGain.toDouble()); put("lutUri", lutUri ?: JSONObject.NULL)
+    put("rg", redGain.toDouble()); put("gg", greenGain.toDouble()); put("bgain", blueGain.toDouble()); put("toneSh", toneShadows.toDouble()); put("toneMid", toneMidtones.toDouble()); put("toneHi", toneHighlights.toDouble()); put("lutUri", lutUri ?: JSONObject.NULL)
     put("filter", filter.name); put("anim", anim.name); put("fin", fadeInMs); put("fout", fadeOutMs)
     put("audioEq", JSONArray().apply { audioEqGainsDb.forEach { put(it.toDouble()) } })
     put("audioFadeIn", audioFadeInMs.coerceAtLeast(0L)); put("audioFadeOut", audioFadeOutMs.coerceAtLeast(0L))
@@ -542,6 +549,9 @@ fun clipFromJson(o: JSONObject): Clip {
         redGain = o.optDouble("rg", 1.0).toFloat(),
         greenGain = o.optDouble("gg", 1.0).toFloat(),
         blueGain = o.optDouble("bgain", 1.0).toFloat(),
+        toneShadows = o.optDouble("toneSh", 0.0).toFloat(),
+        toneMidtones = o.optDouble("toneMid", 0.0).toFloat(),
+        toneHighlights = o.optDouble("toneHi", 0.0).toFloat(),
         lutUri = o.optString("lutUri").takeIf { it.isNotBlank() && it != "null" },
         filter = runCatching { Filter.valueOf(o.getString("filter")) }.getOrDefault(Filter.None),
         anim = runCatching { Anim.valueOf(o.getString("anim")) }.getOrDefault(Anim.None),

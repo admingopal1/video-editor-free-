@@ -1261,6 +1261,11 @@ private fun ToolPanel(
             Slide("Saturation", c.saturation, -1f..1f, f2(c.saturation)) { v -> vm.update(id) { it.copy(saturation = v) } }
             Slide("Warmth", c.warmth, -1f..1f, f2(c.warmth)) { v -> vm.update(id) { it.copy(warmth = v) } }
             Slide("Hue", c.hue, -1f..1f, f2(c.hue)) { v -> vm.update(id) { it.copy(hue = v) } }
+            Text("Master tone curve", fontWeight = FontWeight.SemiBold)
+            Text("Shape shadows, midtones and highlights with a GPU tone curve. Video clips only in this version.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            Slide("Shadows", c.toneShadows, -0.2f..0.2f, f2(c.toneShadows)) { v -> vm.update(id) { it.copy(toneShadows = v) } }
+            Slide("Midtones", c.toneMidtones, -0.2f..0.2f, f2(c.toneMidtones)) { v -> vm.update(id) { it.copy(toneMidtones = v) } }
+            Slide("Highlights", c.toneHighlights, -0.2f..0.2f, f2(c.toneHighlights)) { v -> vm.update(id) { it.copy(toneHighlights = v) } }
             Text("3D color LUT", fontWeight = FontWeight.SemiBold)
             Text("Import a .cube look-up table for GPU-based video grading. LUTs are stored with the project; photos are not supported in this first integration.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1277,7 +1282,8 @@ private fun ToolPanel(
                 vm.update(id) {
                     it.copy(
                         brightness = 0f, contrast = 0f, saturation = 0f, warmth = 0f, hue = 0f,
-                        redGain = 1f, greenGain = 1f, blueGain = 1f
+                        redGain = 1f, greenGain = 1f, blueGain = 1f,
+                        toneShadows = 0f, toneMidtones = 0f, toneHighlights = 0f
                     )
                 }
             }) { Text("Reset") }
