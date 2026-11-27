@@ -43,6 +43,30 @@ class TextLayerTimingTest {
         assertSame(original, trimTextLayerEnd(original, 50L, 100L))
     }
 
+    @Test fun malformedFractionsNormalizeWithoutCrashing() {
+        val malformedStart = layer(start = Float.NaN, end = 0.6f)
+        val startTiming = textLayerTiming(malformedStart, 10_000L)
+        assertEquals(0L, startTiming.startMs)
+        assertEquals(6_000L, startTiming.endMs)
+
+        val malformedEnd = layer(start = 0.2f, end = Float.POSITIVE_INFINITY)
+        val endTiming = textLayerTiming(malformedEnd, 10_000L)
+        assertEquals(2_000L, endTiming.startMs)
+        assertEquals(10_000L, endTiming.endMs)
+
+        val bothMalformed = layer(start = Float.NEGATIVE_INFINITY, end = Float.NaN)
+        val safeTiming = textLayerTiming(bothMalformed, 10_000L)
+        assertEquals(0L, safeTiming.startMs)
+        assertEquals(10_000L, safeTiming.endMs)
+    }
+
+    @Test fun malformedFractionsCanStillBeEditedSafely() {
+        val malformed = layer(start = Float.NaN, end = Float.NaN)
+        val moved = textLayerTiming(moveTextLayerTiming(malformed, 10_000L, 500L), 10_000L)
+        assertEquals(500L, moved.startMs)
+        assertEquals(10_000L, moved.endMs)
+    }
+
     @Test fun zeroDeltaIsNoOp() {
         val original = layer()
         assertSame(original, moveTextLayerTiming(original, 10_000L, 0L))
