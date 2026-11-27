@@ -988,32 +988,38 @@ private fun PreviewStage(vm: EditorViewModel, modifier: Modifier, onAdd: () -> U
                         .zIndex(5f)
                 )
             }
-            val activeOverlay = vm.overlayClips
+            // Render every active photo PIP layer in layer order, not only the topmost one.
+            vm.overlayClips
                 .filter { it.isImage && it.isVisibleAt(vm.timeMs) }
-                .maxByOrNull { it.layerOrder }
-            if (activeOverlay != null) {
-                val overlayBitmap by produceState<Bitmap?>(initialValue = null, activeOverlay.uriString) {
-                    value = withContext(Dispatchers.IO) { vm.overlayBitmap(activeOverlay.uriString) }
+                .sortedBy { it.layerOrder }
+                .forEach { photoLayer ->
+                    key(photoLayer.id) {
+                        val overlayBitmap by produceState<Bitmap?>(initialValue = null, photoLayer.uriString) {
+                            value = withContext(Dispatchers.IO) { vm.overlayBitmap(photoLayer.uriString) }
+                        }
+                        overlayBitmap?.let { imageBitmap ->
+                            Image(
+                                bitmap = imageBitmap.asImageBitmap(),
+                                contentDescription = photoLayer.name,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .offset(x = canvasW * (photoLayer.x / 2f), y = -canvasH * (photoLayer.y / 2f))
+                                    .size(
+                                        width = canvasW * photoLayer.scale.coerceIn(0.05f, 0.95f),
+                                        height = canvasH * photoLayer.scale.coerceIn(0.05f, 0.95f)
+                                    )
+                                    .graphicsLayer {
+                                        alpha = photoLayer.opacity
+                                        rotationZ = -photoLayer.rotation
+                                    }
+                                    .border(1.dp, Color.White.copy(alpha = 0.65f), RoundedCornerShape(6.dp))
+                                    .clickable { vm.selectedOverlayId = photoLayer.id }
+                                    .zIndex(5f + photoLayer.layerOrder)
+                            )
+                        }
+                    }
                 }
-                overlayBitmap?.let { imageBitmap ->
-                    Image(
-                        bitmap = imageBitmap.asImageBitmap(),
-                        contentDescription = activeOverlay.name,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .offset(x = canvasW * (activeOverlay.x / 2f), y = -canvasH * (activeOverlay.y / 2f))
-                            .size(width = canvasW * activeOverlay.scale.coerceIn(0.05f, 0.95f), height = canvasH * activeOverlay.scale.coerceIn(0.05f, 0.95f))
-                            .graphicsLayer {
-                                alpha = activeOverlay.opacity
-                                rotationZ = -activeOverlay.rotation
-                            }
-                            .border(1.dp, Color.White.copy(alpha = 0.65f), RoundedCornerShape(6.dp))
-                            .clickable { vm.selectedOverlayId = activeOverlay.id }
-                            .zIndex(5f)
-                    )
-                }
-            }
             if (current != null) PreviewTextOverlays(current, localOutMs, canvasW, canvasH, vm.outputWidthPx())
 
             if (vm.clips.isEmpty()) {
