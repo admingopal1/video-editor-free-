@@ -426,9 +426,16 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         val tracks = mutableListOf<AudioTrack>()
         val aArr = o.optJSONArray("audio")
         if (aArr != null) {
+            val audioIds = mutableSetOf<Long>()
             for (i in 0 until aArr.length()) {
-                val t = audioFromJson(aArr.getJSONObject(i))
-                if (canOpen(t.uri)) tracks += t else dropped++
+                // One malformed audio entry must not prevent recovery of the rest of the project.
+                val audioJson = aArr.optJSONObject(i)
+                val track = runCatching { audioJson?.let { audioFromJson(it) } }.getOrNull()
+                if (track == null || !audioIds.add(track.id) || !canOpen(track.uri)) {
+                    dropped++
+                    continue
+                }
+                tracks += track
             }
         } else {
             // projects saved by older versions had a single music file
@@ -444,8 +451,8 @@ class EditorViewModel(app: Application) : AndroidViewModel(app) {
         if (overlayArray != null) {
             for (i in 0 until overlayArray.length()) {
                 val overlayJson = overlayArray.optJSONObject(i)
-                val overlay = overlayJson?.let { overlayClipFromJson(it) }
-                if (overlay == null || !overlayIds.add(overlay.id)) {
+                val overlay = runCatching { overlayJson?.let { overlayClipFromJson(it) } }.getOrNull()
+                if (overlay == null || !overlay.isValidOverlayClip() || !overlayIds.add(overlay.id)) {
                     // Duplicate IDs make selection, updates and deletion ambiguous.
                     // Keep the first valid occurrence and safely drop later duplicates.
                     dropped++
