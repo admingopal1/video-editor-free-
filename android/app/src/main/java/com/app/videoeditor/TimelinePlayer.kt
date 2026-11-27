@@ -39,8 +39,10 @@ class TimelinePlayer(
     private val decodePhoto: suspend (Clip) -> Bitmap?,
     private val waveformProvider: (Uri) -> FloatArray? = { null }
 ) {
-    val playerA: ExoPlayer = ExoPlayer.Builder(ctx).build()
-    val playerB: ExoPlayer = ExoPlayer.Builder(ctx).build()
+    private val clipEqA = AudioEqualizerProcessor()
+    private val clipEqB = AudioEqualizerProcessor()
+    val playerA: ExoPlayer = ExoPlayer.Builder(ctx, EqualizerRenderersFactory(ctx, clipEqA)).build()
+    val playerB: ExoPlayer = ExoPlayer.Builder(ctx, EqualizerRenderersFactory(ctx, clipEqB)).build()
 
     /** Project playhead in output milliseconds. */
     var timeMs by mutableLongStateOf(0L); private set
@@ -309,6 +311,7 @@ class TimelinePlayer(
         ).build()
 
     private fun configure(p: ExoPlayer, c: Clip) {
+        if (p === playerA) clipEqA.setGainsDb(c.audioEqGainsDb) else if (p === playerB) clipEqB.setGainsDb(c.audioEqGainsDb)
         p.setPlaybackParameters(PlaybackParameters(c.speed))
         p.volume = if (c.muted) 0f else c.volume.coerceAtMost(1f)
         p.setVideoEffects(buildPreviewGlEffects(c))
