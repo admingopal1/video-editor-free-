@@ -528,6 +528,7 @@ private fun Timeline(
     val scroll = rememberScrollState()
     var expected by remember { mutableIntStateOf(-1) }
     var trimming by remember { mutableStateOf(false) }
+    var snapGuideMs by remember { mutableStateOf<Long?>(null) }
 
     val widths = vm.clips.map { maxOf((it.outputMs / 1000f) * dpPerSec, 52f) }
     val starts = ArrayList<Float>().also { l ->
@@ -601,7 +602,9 @@ private fun Timeline(
                                     .background(Brush.horizontalGradient(listOf(Color(0xFF087E8B), Color(0xFF4F46E5))))
                                     .pointerInput(layer.id, dpPerSec) {
                                         detectDragGesturesAfterLongPress(
-                                            onDragStart = { vm.selectedOverlayId = layer.id },
+                                            onDragStart = { vm.selectedOverlayId = layer.id; snapGuideMs = null },
+                                            onDragEnd = { snapGuideMs = null },
+                                            onDragCancel = { snapGuideMs = null },
                                             onDrag = { change, dragAmount ->
                                                 change.consume()
                                                 val deltaMs = (dragAmount.x / dpPerSec.coerceAtLeast(1f) * 1000f).toLong()
@@ -623,17 +626,18 @@ private fun Timeline(
                                                             add(other.timelineEndMs.coerceIn(0L, totalDurationMs))
                                                         }
                                                     }
+                                                    val requestedStart = (layer.timelineStartMs.toDouble() + deltaMs.toDouble())
+                                                        .coerceIn(0.0, totalDurationMs.toDouble()).toLong()
+                                                    val snapped = snapOverlayTimelineStart(
+                                                        requestedStartMs = requestedStart,
+                                                        durationMs = layer.outputMs,
+                                                        totalDurationMs = totalDurationMs,
+                                                        boundariesMs = boundaries,
+                                                        thresholdMs = ((8f / dpPerSec.coerceAtLeast(1f)) * 1_000f)
+                                                            .toLong().coerceIn(60L, 500L)
+                                                    )
+                                                    snapGuideMs = snapped.snappedToMs
                                                     vm.updateOverlay(layer.id) {
-                                                        val requestedStart = (it.timelineStartMs.toDouble() + deltaMs.toDouble())
-                                                            .coerceIn(0.0, totalDurationMs.toDouble()).toLong()
-                                                        val snapped = snapOverlayTimelineStart(
-                                                            requestedStartMs = requestedStart,
-                                                            durationMs = it.outputMs,
-                                                            totalDurationMs = totalDurationMs,
-                                                            boundariesMs = boundaries,
-                                                            thresholdMs = ((8f / dpPerSec.coerceAtLeast(1f)) * 1_000f)
-                                                                .toLong().coerceIn(60L, 500L)
-                                                        )
                                                         it.copy(timelineStartMs = snapped.positionMs)
                                                     }
                                                 }
@@ -681,6 +685,15 @@ private fun Timeline(
                                     )
                                 }
                             }
+                        }
+                        snapGuideMs?.let { guideMs ->
+                            val guideX = (guideMs / 1000f * dpPerSec).coerceIn(0f, totalDp)
+                            Box(
+                                Modifier.offset(x = guideX.dp)
+                                    .width(2.dp)
+                                    .fillMaxHeight()
+                                    .background(Color(0xFFFFD54F))
+                            )
                         }
                     }
                 }
