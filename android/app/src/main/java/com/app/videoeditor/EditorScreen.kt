@@ -1486,10 +1486,31 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
             }
             t.gainPoints.forEachIndexed { index, point ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(String.format(Locale.US, "%.1fs", point.timeMs / 1000f), Modifier.width(48.dp), style = MaterialTheme.typography.labelSmall)
+                    Text(String.format(Locale.US, "%.1fs", point.timeMs / 1000f), Modifier.width(42.dp), style = MaterialTheme.typography.labelSmall)
+                    TextButton(
+                        onClick = {
+                            vm.updateAudio(t.id) { track ->
+                                val moved = track.gainPoints.mapIndexed { i, old ->
+                                    if (i == index) old.copy(timeMs = (old.timeMs - 100L).coerceAtLeast(0L)) else old
+                                }
+                                track.copy(gainPoints = moved.distinctBy { it.timeMs }.sortedBy { it.timeMs })
+                            }
+                        },
+                        enabled = point.timeMs > 0L
+                    ) { Text("−0.1") }
                     Slider(value = point.gain.coerceIn(0f, 2f), onValueChange = { value ->
                         vm.updateAudio(t.id) { track -> track.copy(gainPoints = track.gainPoints.mapIndexed { i, old -> if (i == index) old.copy(gain = value) else old }) }
                     }, valueRange = 0f..2f, modifier = Modifier.weight(1f))
+                    TextButton(
+                        onClick = {
+                            vm.updateAudio(t.id) { track ->
+                                val moved = track.gainPoints.mapIndexed { i, old ->
+                                    if (i == index) old.copy(timeMs = old.timeMs + 100L) else old
+                                }
+                                track.copy(gainPoints = moved.distinctBy { it.timeMs }.sortedBy { it.timeMs })
+                            }
+                        }
+                    ) { Text("+0.1") }
                     TextButton(onClick = { vm.updateAudio(t.id) { track -> track.copy(gainPoints = track.gainPoints.filterIndexed { i, _ -> i != index }) } }) { Text("Remove") }
                 }
             }
