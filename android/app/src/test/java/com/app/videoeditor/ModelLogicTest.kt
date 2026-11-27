@@ -168,6 +168,18 @@ class ModelLogicTest {
     }
 
     @Test
+    fun overlappingAudioFadesAreShortenedProportionally() {
+        assertEquals(0f, audioFadeGainAt(0L, 1_000L, 800L, 800L), 0.0001f)
+        assertEquals(1f, audioFadeGainAt(500L, 1_000L, 800L, 800L), 0.0001f)
+        assertEquals(0f, audioFadeGainAt(1_000L, 1_000L, 800L, 800L), 0.0001f)
+    }
+
+    @Test
+    fun extremeFadeDurationsDoNotOverflow() {
+        assertEquals(1f, audioFadeGainAt(500L, 1_000L, Long.MAX_VALUE, Long.MAX_VALUE), 0.0001f)
+    }
+
+    @Test
     fun audioGainKeyframesInterpolateAndClamp() {
         val points = listOf(AudioGainPoint(0L, 0f), AudioGainPoint(1_000L, 2f))
         assertEquals(0f, audioKeyframeGainAt(points, 0L), 0.0001f)
