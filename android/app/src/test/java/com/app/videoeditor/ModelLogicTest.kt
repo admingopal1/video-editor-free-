@@ -205,4 +205,21 @@ class ModelLogicTest {
         assertEquals(1f, audioKeyframeGainAt(emptyList(), 500L), 0.0001f)
     }
 
+    @Test
+    fun movingAutomationPointPreservesUniqueTimesAndGainValues() {
+        val points = listOf(AudioGainPoint(100L, 0.2f), AudioGainPoint(200L, 0.8f), AudioGainPoint(300L, 1.4f))
+        val moved = moveAudioGainPoint(points, 1, 100L)
+        assertEquals(listOf(100L, 300L, 400L), moved.map { it.timeMs })
+        assertEquals(0.8f, moved.first { it.timeMs == 300L }.gain, 0.0001f)
+        assertEquals(points, moveAudioGainPoint(points, -1, 100L))
+    }
+
+    @Test
+    fun movingAutomationPointBackwardClampsAtZeroAndSkipsOccupiedTimes() {
+        val points = listOf(AudioGainPoint(0L, 0.3f), AudioGainPoint(100L, 0.7f), AudioGainPoint(200L, 1.1f))
+        val moved = moveAudioGainPoint(points, 2, -200L)
+        assertEquals(listOf(0L, 100L, 200L), moved.map { it.timeMs })
+        assertEquals(1.1f, moved.last().gain, 0.0001f)
+    }
+
 }
