@@ -42,7 +42,9 @@ data class AudioTrack(
     val fadeOutMs: Long = 0L,
     val gainPoints: List<AudioGainPoint> = emptyList(),
     val isVoiceover: Boolean = false,
-    val autoDuck: Boolean = false
+    val autoDuck: Boolean = false,
+    val noiseGateEnabled: Boolean = false,
+    val noiseGateThreshold: Float = 0.04f
 )
 
 fun trimmedDurationMs(startMs: Long, endMs: Long): Long = (endMs - startMs).coerceAtLeast(0L)
@@ -149,6 +151,27 @@ fun buildVoiceDuckingPoints(
     if (points.isNotEmpty() && points.last().timeMs < totalMs - backgroundOffsetMs) {
         points += AudioGainPoint(totalMs - backgroundOffsetMs, 1f)
     }
+    return points
+}
+
+
+/** Basic waveform voice gate: attenuates low-level buckets between phrases; not spectral denoising. */
+fun buildVoiceGatePoints(waveform: FloatArray, durationMs: Long, threshold: Float, bucketMs: Long = 100L, closedGain: Float = 0.08f): List<AudioGainPoint> {
+    if (waveform.isEmpty() || durationMs <= 0L) return emptyList()
+    val step = bucketMs.coerceAtLeast(20L)
+    var gain = 1f
+    val points = mutableListOf<AudioGainPoint>()
+    var time = 0L
+    while (time <= durationMs) {
+        val index = (time / step).toInt()
+        val active = index in waveform.indices && waveform[index] >= threshold.coerceIn(0.001f, 1f)
+        val target = if (active) 1f else closedGain.coerceIn(0f, 1f)
+        val blend = if (target < gain) (step.toFloat() / 80f).coerceIn(0f, 1f) else (step.toFloat() / 300f).coerceIn(0f, 1f)
+        gain += (target - gain) * blend
+        points += AudioGainPoint(time, gain)
+        time += step
+    }
+    if (points.last().timeMs < durationMs) points += AudioGainPoint(durationMs, closedGain.coerceIn(0f, 1f))
     return points
 }
 
@@ -330,7 +353,7 @@ fun clipFromJson(o: JSONObject): Clip {
 
 fun AudioTrack.toJson(): JSONObject = JSONObject().apply {
     put("id", id); put("uri", uri.toString()); put("name", name); put("vol", volume.toDouble())
-    put("off", offsetMs); put("trim", trimStartMs); put("trimEnd", trimEndMs); put("loop", loop); put("fadeIn", fadeInMs); put("fadeOut", fadeOutMs); put("gainPoints", JSONArray().apply { gainPoints.forEach { put(JSONObject().put("time", it.timeMs).put("gain", it.gain.toDouble())) } }); put("voiceover", isVoiceover); put("autoDuck", autoDuck)
+    put("off", offsetMs); put("trim", trimStartMs); put("trimEnd", trimEndMs); put("loop", loop); put("fadeIn", fadeInMs); put("fadeOut", fadeOutMs); put("gainPoints", JSONArray().apply { gainPoints.forEach { put(JSONObject().put("time", it.timeMs).put("gain", it.gain.toDouble())) } }); put("voiceover", isVoiceover); put("autoDuck", autoDuck); put("noiseGate", noiseGateEnabled); put("noiseGateThreshold", noiseGateThreshold.toDouble())
 }
 
 fun audioFromJson(o: JSONObject): AudioTrack = AudioTrack(
@@ -342,5 +365,7 @@ fun audioFromJson(o: JSONObject): AudioTrack = AudioTrack(
     fadeOutMs = o.optLong("fadeOut", 0L).coerceAtLeast(0L),
     gainPoints = (o.optJSONArray("gainPoints")?.let { a -> (0 until a.length()).mapNotNull { i -> a.optJSONObject(i)?.let { AudioGainPoint(it.optLong("time", 0L).coerceAtLeast(0L), it.optDouble("gain", 1.0).toFloat().coerceIn(0f, 2f)) } } } ?: emptyList()).sortedBy { it.timeMs },
     isVoiceover = o.optBoolean("voiceover", false),
-    autoDuck = o.optBoolean("autoDuck", false)
+    autoDuck = o.optBoolean("autoDuck", false),
+    noiseGateEnabled = o.optBoolean("noiseGate", false),
+    noiseGateThreshold = o.optDouble("noiseGateThreshold", 0.04).toFloat().coerceIn(0.001f, 1f)
 )

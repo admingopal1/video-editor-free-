@@ -68,6 +68,8 @@ class TimelinePlayer(
     private val audioPlayers = HashMap<Long, ExoPlayer>()
     private var duckingCacheKey = ""
     private var duckingCache: Map<Long, List<AudioGainPoint>> = emptyMap()
+    private var gateCacheKey = ""
+    private var gateCache: Map<Long, List<AudioGainPoint>> = emptyMap()
 
     private val active: ExoPlayer get() = if (activeIsA) playerA else playerB
     private val standby: ExoPlayer get() = if (activeIsA) playerB else playerA
@@ -320,12 +322,19 @@ class TimelinePlayer(
         audioPlayers.keys.filter { it !in ids }.forEach { id -> audioPlayers.remove(id)?.release() }
         val voiceovers = tracks.filter { it.isVoiceover }
         val voiceWaveforms = voiceovers.mapNotNull { voice -> waveformProvider(voice.uri)?.let { voice.id to it } }.toMap()
-        val cacheKey = tracks.joinToString("|") { "${it.id}:${it.offsetMs}:${it.trimStartMs}:${it.trimEndMs}:${it.isVoiceover}:${it.autoDuck}:${waveformProvider(it.uri)?.let { wave -> System.identityHashCode(wave) } ?: 0}" }
+        val cacheKey = tracks.joinToString("|") { "${it.id}:${it.offsetMs}:${it.trimStartMs}:${it.trimEndMs}:${it.isVoiceover}:${it.autoDuck}:${it.noiseGateEnabled}:${it.noiseGateThreshold}:${waveformProvider(it.uri)?.let { wave -> System.identityHashCode(wave) } ?: 0}" }
         if (cacheKey != duckingCacheKey) {
             duckingCacheKey = cacheKey
             duckingCache = tracks.filter { it.autoDuck && !it.isVoiceover }.associate { track ->
                 track.id to buildVoiceDuckingPoints(voiceovers.map { VoiceoverActivity(it.id, it.offsetMs, it.trimStartMs, it.trimEndMs) }, voiceWaveforms, totalMs(), track.offsetMs)
             }
+        }
+        if (cacheKey != gateCacheKey) {
+            gateCacheKey = cacheKey
+            gateCache = tracks.filter { it.isVoiceover && it.noiseGateEnabled }.mapNotNull { track ->
+                val wave = waveformProvider(track.uri) ?: return@mapNotNull null
+                track.id to buildVoiceGatePoints(wave, wave.size * 100L, track.noiseGateThreshold)
+            }.toMap()
         }
         for (t in tracks) {
             val p = audioPlayers.getOrPut(t.id) {
@@ -339,7 +348,8 @@ class TimelinePlayer(
             val fadeGain = audioFadeGainAt(elapsedMs, trackDurationMs, t.fadeInMs, t.fadeOutMs)
             val keyframeGain = audioKeyframeGainAt(t.gainPoints, elapsedMs)
             val duckGain = audioKeyframeGainAt(duckingCache[t.id] ?: emptyList(), elapsedMs)
-            p.volume = (t.volume * fadeGain * keyframeGain * duckGain).coerceIn(0f, 1f)
+            val gateGain = audioKeyframeGainAt(gateCache[t.id] ?: emptyList(), elapsedMs)
+            p.volume = (t.volume * fadeGain * keyframeGain * duckGain * gateGain).coerceIn(0f, 1f)
             p.repeatMode = if (t.loop && t.fadeInMs == 0L && t.fadeOutMs == 0L && t.gainPoints.isEmpty() && !t.autoDuck && (duckingCache[t.id].isNullOrEmpty()) && t.offsetMs == 0L && t.trimEndMs == Long.MAX_VALUE) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
             val wanted = timeMs - t.offsetMs + t.trimStartMs
             val reachedTrimEnd = t.trimEndMs != Long.MAX_VALUE && wanted >= t.trimEndMs

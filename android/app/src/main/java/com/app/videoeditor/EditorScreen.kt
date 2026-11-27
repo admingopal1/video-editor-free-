@@ -1428,6 +1428,18 @@ private fun AudioPanel(vm: EditorViewModel, pickAudio: () -> Unit, record: () ->
                 }
             } else {
                 Text("🎙 Voice-over track", style = MaterialTheme.typography.labelMedium, color = Pal.textLo)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Basic noise gate", style = MaterialTheme.typography.bodyMedium)
+                        Text("Reduces quiet noise between phrases; does not remove noise under speech.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+                    }
+                    Switch(checked = t.noiseGateEnabled, onCheckedChange = { enabled -> vm.updateAudio(t.id) { it.copy(noiseGateEnabled = enabled, loop = false) } })
+                }
+                if (t.noiseGateEnabled) {
+                    Slide("Gate sensitivity", t.noiseGateThreshold, 0.01f..0.25f, String.format(Locale.US, "%.2f", t.noiseGateThreshold)) { value ->
+                        vm.updateAudio(t.id) { it.copy(noiseGateThreshold = value.coerceIn(0.01f, 0.25f), loop = false) }
+                    }
+                }
             }
             Slide("Starts at", t.offsetMs / 1000f, 0f..total, String.format(Locale.US, "%.1fs", t.offsetMs / 1000f)) { v ->
                 vm.updateAudio(t.id) { it.copy(offsetMs = (v * 10).toLong() * 100L) }

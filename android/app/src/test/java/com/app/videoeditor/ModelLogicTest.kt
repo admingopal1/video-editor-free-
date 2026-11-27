@@ -112,6 +112,19 @@ class ModelLogicTest {
     }
 
     @Test
+    fun voiceGateAttenuatesQuietBucketsAndOpensForSpeech() {
+        val points = buildVoiceGatePoints(floatArrayOf(0f, 0f, 0.8f, 0.9f, 0f, 0f), 600L, 0.1f)
+        assertEquals(true, audioKeyframeGainAt(points, 0L) < 1f)
+        assertEquals(true, audioKeyframeGainAt(points, 250L) > audioKeyframeGainAt(points, 50L))
+        assertEquals(true, audioKeyframeGainAt(points, 550L) < audioKeyframeGainAt(points, 350L))
+    }
+
+    @Test
+    fun voiceGateEmptyWaveformProducesNoAutomation() {
+        assertEquals(emptyList<AudioGainPoint>(), buildVoiceGatePoints(floatArrayOf(), 1_000L, 0.1f))
+    }
+
+    @Test
     fun audioFadeEnvelopeRampsInAndOut() {
         assertEquals(0f, audioFadeGainAt(0L, 1_000L, 200L, 300L), 0.0001f)
         assertEquals(0.5f, audioFadeGainAt(100L, 1_000L, 200L, 300L), 0.0001f)
