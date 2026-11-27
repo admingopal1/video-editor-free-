@@ -144,6 +144,34 @@ class ModelLogicTest {
     }
 
     @Test
+    fun crossfadeUsesFullSourceDurationForLongTracksBeyondWaveformLimit() {
+        val longDuration = 45L * 60L * 1_000L
+        val first = AudioCrossfadeState(1L, 0L, 0L, Long.MAX_VALUE, 0L, 0L, false)
+        val second = AudioCrossfadeState(2L, 2_600_000L, 0L, Long.MAX_VALUE, 0L, 0L, false)
+        val result = configureAudioCrossfade(
+            listOf(first, second),
+            1L,
+            mapOf(1L to longDuration, 2L to 900_000L),
+            3_000L
+        )
+        assertEquals(longDuration, result[0].trimEndMs)
+        assertEquals(3_000L, result[0].fadeOutMs)
+        assertEquals(longDuration - 3_000L, result[1].offsetMs)
+        assertEquals(3_000L, result[1].fadeInMs)
+    }
+
+    @Test
+    fun crossfadeRespectsBothTracksSelectedTrimRanges() {
+        val first = AudioCrossfadeState(1L, 0L, 5_000L, 20_000L, 0L, 0L, false)
+        val second = AudioCrossfadeState(2L, 30_000L, 2_000L, 7_000L, 0L, 0L, false)
+        val result = configureAudioCrossfade(listOf(first, second), 1L, mapOf(1L to 25_000L, 2L to 10_000L), 8_000L)
+        assertEquals(5_000L, result[0].fadeOutMs)
+        assertEquals(5_000L, result[1].fadeInMs)
+        assertEquals(15_000L, result[0].trimEndMs)
+        assertEquals(10_000L, result[1].offsetMs)
+    }
+
+    @Test
     fun crossfadeDoesNotChangeTracksWithoutKnownDurationsOrNextTrack() {
         val first = AudioCrossfadeState(1L, 0L, 0L, Long.MAX_VALUE, 0L, 0L, false)
         val second = AudioCrossfadeState(2L, 5_000L, 0L, Long.MAX_VALUE, 0L, 0L, false)
