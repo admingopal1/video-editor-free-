@@ -50,7 +50,7 @@ class AudioFadeProcessor(
             val gain = minOf(fadeInGain, fadeOutGain) * keyframeGain * duckGain * gateGain
             repeat(channels) {
                 if (isFloat) {
-                    output.putFloat(inputBuffer.float * gain)
+                    output.putFloat(clampPcmFloatSample(inputBuffer.float * gain))
                 } else {
                     val sample = inputBuffer.short.toInt()
                     output.putShort((sample * gain).roundToInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort())
