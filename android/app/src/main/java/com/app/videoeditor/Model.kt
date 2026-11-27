@@ -141,6 +141,19 @@ fun configureAudioCrossfade(
 fun normalizedAudioTrimEndMs(trimEndMs: Long?, trimStartMs: Long): Long =
     (trimEndMs ?: Long.MAX_VALUE).coerceAtLeast(trimStartMs + 1L)
 
+/** Duration of the selected audio source range that fits inside the project timeline. */
+fun audioTrackOutputDurationMs(
+    trimStartMs: Long,
+    trimEndMs: Long,
+    trackOffsetMs: Long,
+    projectDurationMs: Long
+): Long {
+    val start = trimStartMs.coerceAtLeast(0L)
+    val timelineRemaining = (projectDurationMs - trackOffsetMs).coerceAtLeast(0L)
+    val timelineEnd = if (Long.MAX_VALUE - start < timelineRemaining) Long.MAX_VALUE else start + timelineRemaining
+    return (minOf(trimEndMs, timelineEnd) - start).coerceAtLeast(0L)
+}
+
 fun audioFadeGainAt(elapsedMs: Long, durationMs: Long, fadeInMs: Long, fadeOutMs: Long): Float {
     if (durationMs <= 0L) return 0f
     val position = elapsedMs.coerceIn(0L, durationMs)
