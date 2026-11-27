@@ -539,6 +539,21 @@ fun AudioTrack.toJson(): JSONObject = JSONObject().apply {
     put("off", offsetMs); put("trim", trimStartMs); put("trimEnd", trimEndMs); put("loop", loop); put("fadeIn", fadeInMs); put("fadeOut", fadeOutMs); put("gainPoints", JSONArray().apply { gainPoints.forEach { put(JSONObject().put("time", it.timeMs).put("gain", it.gain.toDouble())) } }); put("voiceover", isVoiceover); put("autoDuck", autoDuck); put("noiseGate", noiseGateEnabled); put("noiseGateThreshold", noiseGateThreshold.toDouble()); put("muted", muted); put("solo", solo); put("eqGainsDb", JSONArray().apply { eqGainsDb.forEach { put(it.toDouble()) } })
 }
 
+/** Reject malformed audio metadata before it enters the editable project state. */
+fun AudioTrack.isValidProjectAudioTrack(): Boolean =
+    id > 0L &&
+        uri.toString().isNotBlank() &&
+        name.isNotBlank() &&
+        volume.isFinite() && volume in 0f..2f &&
+        offsetMs >= 0L &&
+        trimStartMs >= 0L &&
+        trimEndMs > trimStartMs &&
+        fadeInMs >= 0L && fadeOutMs >= 0L &&
+        noiseGateThreshold.isFinite() && noiseGateThreshold in 0.001f..1f &&
+        gainPoints.all { it.timeMs >= 0L && it.gain.isFinite() && it.gain in 0f..2f } &&
+        eqGainsDb.size == AudioEqualizerProcessor.BAND_COUNT &&
+        eqGainsDb.all { it.isFinite() && it in -12f..12f }
+
 fun audioFromJson(o: JSONObject): AudioTrack = AudioTrack(
     id = o.getLong("id"), uri = Uri.parse(o.getString("uri")), name = o.optString("name", "Audio"),
     volume = o.optDouble("vol", 1.0).toFloat(), offsetMs = o.optLong("off", 0L),
