@@ -29,7 +29,9 @@ private class ClipMaskShaderProgram(
     private val program: GlProgram
     init {
         try {
-            program = GlProgram(context, R.raw.mask_vertex_shader_es2, R.raw.mask_fragment_shader_es2)
+            val vertexShader = context.resources.openRawResource(R.raw.mask_vertex_shader_es2).bufferedReader().use { it.readText() }
+            val fragmentShader = context.resources.openRawResource(R.raw.mask_fragment_shader_es2).bufferedReader().use { it.readText() }
+            program = GlProgram(vertexShader, fragmentShader)
         } catch (error: IOException) { throw VideoFrameProcessingException(error)
         } catch (error: GlUtil.GlException) { throw VideoFrameProcessingException(error) }
         program.setBufferAttribute("aFramePosition", GlUtil.getNormalizedCoordinateBounds(), GlUtil.HOMOGENEOUS_COORDINATE_VECTOR_SIZE)
