@@ -200,7 +200,7 @@ fun EditorScreen(vm: EditorViewModel) {
                 Text("＋ PIP", color = Pal.cyan, fontWeight = FontWeight.SemiBold)
             }
             TextButton(onClick = { pickOverlayVideo.launch(arrayOf("video/*")) }) {
-                Text("＋ PIP video", color = Pal.cool, fontWeight = FontWeight.SemiBold)
+                Text("＋ PIP video", color = Pal.cyan, fontWeight = FontWeight.SemiBold)
             }
             GradientButton("Export", onClick = { requestExport() }, enabled = vm.clips.isNotEmpty(), shimmer = vm.clips.isNotEmpty())
         }
