@@ -99,7 +99,7 @@ private class TimedBitmapOverlay(
 
     override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings {
         val visible = presentationTimeUs >= startUs && presentationTimeUs < endUs
-        return StaticStaticOverlaySettings.Builder()
+        return StaticOverlaySettings.Builder()
             .setBackgroundFrameAnchor(layer.x, layer.y)
             .setOverlayFrameAnchor(0f, 0f)
             .setScale(layer.scale, layer.scale)
