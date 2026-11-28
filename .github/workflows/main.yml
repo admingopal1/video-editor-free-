@@ -33,6 +33,13 @@ jobs:
         run: gradle testDebugUnitTest --no-daemon --stacktrace
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
+      - name: Run PIP compositor device smoke tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_2
+          script: cd android && gradle connectedDebugAndroidTest --no-daemon --stacktrace
       - name: Build signed release (APK + AAB)
         if: env.KS != ''
         run: gradle assembleRelease bundleRelease --no-daemon --stacktrace

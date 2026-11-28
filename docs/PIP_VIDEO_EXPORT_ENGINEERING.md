@@ -34,6 +34,10 @@ Official references:
 
 These tests verify planning and API wiring only. They do **not** prove that a real encoded file has correct pixels, timestamps, audio mix, or device compatibility.
 
+## Instrumentation smoke coverage
+
+GitHub Actions now boots an Android API 35 emulator and runs `connectedDebugAndroidTest`. The initial device test instantiates the real Media3 compositor settings, verifies primary-output sizing and exercises active/inactive PIP overlay-settings construction on Android. This is an API/runtime smoke test only; it does not render a video or validate encoded pixels/audio. The export guard remains enabled.
+
 ## Acceptance tests required before enabling export
 
 ### Visual and timeline
