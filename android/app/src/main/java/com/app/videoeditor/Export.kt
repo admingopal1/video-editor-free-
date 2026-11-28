@@ -22,6 +22,7 @@ import android.text.style.BackgroundColorSpan
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import android.text.style.TypefaceSpan
+import androidx.media3.common.C
 import androidx.media3.common.Effect
 import androidx.media3.common.OverlaySettings
 import androidx.media3.common.MediaItem
@@ -466,7 +467,45 @@ fun buildComposition(
         }
         builder.setEffects(Effects(buildAudioProcessors(c), buildVideoEffects(c, presentation, true, fps, overlayLayers = overlayLayers, clipTimelineStartMs = clipStartMs, overlayContext = ctx))).build()
     }
-    val sequences = mutableListOf(EditedMediaItemSequence(items))
+    // Media3 compositor input order is foreground layers first, primary video last.
+    // This remains behind the ViewModel preflight guard until rendered-output acceptance tests pass.
+    val pipPlan = buildPipVideoCompositionPlan(overlayLayers)
+    val sequences = mutableListOf<EditedMediaItemSequence>()
+    pipPlan.videoInputs.forEach { input ->
+        val layer = input.layer
+        val trackTypes = if (layer.muted) {
+            setOf(C.TRACK_TYPE_VIDEO)
+        } else {
+            setOf(C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_VIDEO)
+        }
+        val sequence = EditedMediaItemSequence.Builder(trackTypes)
+        if (layer.timelineStartMs > 0L) {
+            sequence.addGap(layer.timelineStartMs * 1_000L)
+        }
+        val mediaItem = MediaItem.Builder()
+            .setUri(Uri.parse(layer.uriString))
+            .setClippingConfiguration(
+                MediaItem.ClippingConfiguration.Builder()
+                    .setStartPositionMs(layer.startMs)
+                    .setEndPositionMs(layer.endMs)
+                    .build()
+            )
+            .build()
+        val audioProcessors = buildList {
+            if (!layer.muted && layer.speed != 1f) add(SonicAudioProcessor().apply { setSpeed(layer.speed) })
+            if (!layer.muted && layer.volume != 1f) add(volumeProcessor(layer.volume))
+        }
+        val videoEffects = if (layer.speed != 1f) listOf<Effect>(SpeedChangeEffect(layer.speed)) else emptyList()
+        sequence.addItem(
+            EditedMediaItem.Builder(mediaItem)
+                .setRemoveAudio(layer.muted)
+                .setEffects(Effects(audioProcessors, videoEffects))
+                .build()
+        )
+        sequences += sequence.build()
+    }
+    // Keep the primary timeline after PIP sequences so its compositor input ID matches the plan.
+    sequences += EditedMediaItemSequence(items)
 
     val totalMs = clips.sumOf { it.outputMs }
     var loopUsed = false
@@ -502,6 +541,7 @@ fun buildComposition(
         sequences += EditedMediaItemSequence(audioItems, loop)
     }
     return Composition.Builder(sequences)
+        .setVideoCompositorSettings(PipVideoCompositorSettings(pipPlan))
         .experimentalSetForceAudioTrack(true)
         .build()
 }
