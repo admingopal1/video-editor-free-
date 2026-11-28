@@ -431,8 +431,8 @@ fun buildAudioProcessors(c: Clip): List<AudioProcessor> {
 }
 
 fun volumeProcessor(v: Float): AudioProcessor = ChannelMixingAudioProcessor().apply {
-    putChannelMixingMatrix(ChannelMixingMatrix.create(1, 2).scaleBy(v))
-    putChannelMixingMatrix(ChannelMixingMatrix.create(2, 2).scaleBy(v))
+    putChannelMixingMatrix(ChannelMixingMatrix.createForConstantGain(1, 2).scaleBy(v))
+    putChannelMixingMatrix(ChannelMixingMatrix.createForConstantGain(2, 2).scaleBy(v))
 }
 
 fun buildComposition(
