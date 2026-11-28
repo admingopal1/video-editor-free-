@@ -99,7 +99,7 @@ private class TimedBitmapOverlay(
 
     override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings {
         val visible = presentationTimeUs >= startUs && presentationTimeUs < endUs
-        return StaticOverlaySettings.Builder()
+        return StaticStaticOverlaySettings.Builder()
             .setBackgroundFrameAnchor(layer.x, layer.y)
             .setOverlayFrameAnchor(0f, 0f)
             .setScale(layer.scale, layer.scale)
@@ -242,7 +242,7 @@ private fun timedOverlay(c: Clip, t: TextLayer): TextureOverlay {
 
         override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings {
             val r = textRender(t, total, tb.rel(presentationTimeUs))
-            return OverlaySettings.Builder()
+            return StaticOverlaySettings.Builder()
                 .setBackgroundFrameAnchor(t.x, r.y)
                 .setRotationDegrees(t.rotation)
                 .setScale(r.scale, r.scale)
@@ -259,7 +259,7 @@ private fun textOverlays(c: Clip): List<TextureOverlay> =
         } else {
             TextOverlay.createStaticTextOverlay(
                 styledText(t),
-                OverlaySettings.Builder()
+                StaticOverlaySettings.Builder()
                     .setBackgroundFrameAnchor(t.x, t.y)
                     .setRotationDegrees(t.rotation)
                     .setScale(t.scale, t.scale)
