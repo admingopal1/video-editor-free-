@@ -33,7 +33,8 @@ class PipVideoCompositorSettingsTest {
         val pipSize = Size(640, 360)
         val primarySize = Size(1920, 1080)
 
-        assertEquals(primarySize, settings.getOutputSize(listOf(pipSize, primarySize)))
+        // DefaultVideoCompositor supplies sizes with the primary stream first.
+        assertEquals(primarySize, settings.getOutputSize(listOf(primarySize, pipSize)))
     }
 
     @Test fun primaryOrUnknownInputRemainsFullyVisible() {

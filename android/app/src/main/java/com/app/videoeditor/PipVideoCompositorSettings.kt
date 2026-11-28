@@ -34,7 +34,8 @@ internal fun pipOverlayTransform(input: PipVideoInputPlan?, presentationTimeUs: 
 class PipVideoCompositorSettings(private val plan: PipVideoCompositionPlan) : VideoCompositorSettings {
     override fun getOutputSize(inputSizes: List<Size>): Size {
         if (inputSizes.isEmpty()) return Size(1, 1)
-        return inputSizes[pipPrimaryInputIndex(plan.primaryInputId, inputSizes.size)]
+        // Media3 passes the primary stream first, followed by secondary overlay streams.
+        return inputSizes.first()
     }
 
     override fun getOverlaySettings(inputId: Int, presentationTimeUs: Long): OverlaySettings {
