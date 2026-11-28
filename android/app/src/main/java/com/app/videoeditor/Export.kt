@@ -512,10 +512,10 @@ fun buildComposition(
             })
         }
         sequence.addItem(editedItemBuilder.build())
-        if (input.inputId == 0) {
-            val trailingGapUs = pipPrimaryTrailingGapUs(input, totalDurationUs)
-            if (trailingGapUs > 0L) sequence.addGap(trailingGapUs)
-        }
+        // Every secondary stream must keep emitting frames through the project end.
+        // Otherwise Media3 may reuse its final visible frame after this PIP's interval.
+        val trailingGapUs = pipVideoTrailingGapUs(input, totalDurationUs)
+        if (trailingGapUs > 0L) sequence.addGap(trailingGapUs)
         sequences += sequence.build()
     }
     // Keep the primary timeline after PIP sequences so its compositor input ID matches the plan.

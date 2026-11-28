@@ -56,7 +56,7 @@ internal fun isPipVideoInputVisible(
     presentationTimeUs < input.timelineEndUs
 
 /** The first PIP sequence drives the compositor clock and must span the whole project. */
-internal fun pipPrimaryTrailingGapUs(
+internal fun pipVideoTrailingGapUs(
     firstPipInput: PipVideoInputPlan,
     projectDurationUs: Long
 ): Long = (projectDurationUs - firstPipInput.timelineEndUs).coerceAtLeast(0L)

@@ -90,9 +90,22 @@ class PipVideoCompositionPlanTest {
             listOf(layer(41L, 0, timelineStartMs = 2_000L))
         ).videoInputs.single()
 
-        assertEquals(4_000_000L, pipPrimaryTrailingGapUs(input, 10_000_000L))
+        assertEquals(4_000_000L, pipVideoTrailingGapUs(input, 10_000_000L))
         assertEquals(0L, pipPrimaryTrailingGapUs(input, 6_000_000L))
         assertEquals(0L, pipPrimaryTrailingGapUs(input, 5_000_000L))
+    }
+
+    @Test
+    fun everyPipSequenceGetsTrailingGapToProjectEnd() {
+        val inputs = buildPipVideoCompositionPlan(
+            listOf(
+                layer(51L, 1, timelineStartMs = 2_000L),
+                layer(52L, 0, timelineStartMs = 4_000L)
+            )
+        ).videoInputs
+
+        assertEquals(6_000_000L, pipVideoTrailingGapUs(inputs[0], 12_000_000L))
+        assertEquals(4_000_000L, pipVideoTrailingGapUs(inputs[1], 12_000_000L))
     }
 
     @Test
