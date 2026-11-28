@@ -480,8 +480,9 @@ fun buildComposition(
             setOf(C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_VIDEO)
         }
         val sequence = EditedMediaItemSequence.Builder(trackTypes)
-        if (layer.timelineStartMs > 0L) {
-            sequence.addGap(layer.timelineStartMs * 1_000L)
+        if (input.timelineStartUs > 0L) {
+            // Reuse the plan's saturated conversion so extreme offsets cannot overflow.
+            sequence.addGap(input.timelineStartUs)
         }
         val mediaItem = MediaItem.Builder()
             .setUri(Uri.parse(layer.uriString))
