@@ -75,3 +75,6 @@ Do not weaken `EditorViewModel.preflight()` until the compositor and audio mixer
 
 
 Dependency compatibility note: the compositor adapter requires `VideoCompositorSettings`; Media3 1.5.1 does not expose this API. The project is being aligned to Media3 1.8.1 for validation. Video-PIP export remains guarded until real rendered output and audio tests pass.
+
+
+Compatibility correction: the attempted Media3 1.8.1 alignment broke existing `OverlaySettings` imports used by photo overlays. The project is restored to its previously verified Media3 1.5.1 baseline. The unverified video-compositor adapter is removed; PIP video export remains guarded while a compatible implementation is investigated.

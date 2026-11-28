@@ -49,7 +49,7 @@ android {
 dependencies {
     // VideoCompositorSettings is required for the multi-sequence PIP compositor.
     // Keep every Media3 artifact on the same version to avoid binary/API mismatches.
-    val media3 = "1.8.1"
+    val media3 = "1.5.1"
     implementation("androidx.media3:media3-exoplayer:$media3")
     implementation("androidx.media3:media3-transformer:$media3")
     implementation("androidx.media3:media3-effect:$media3")
