@@ -1,5 +1,6 @@
 package com.app.videoeditor
 
+import androidx.media3.common.util.Size
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -25,6 +26,14 @@ class PipVideoCompositorSettingsTest {
         assertEquals(0.3f, active.scaleX, 0f)
         assertEquals(0.55f, active.backgroundAnchorX, 0f)
         assertEquals(-0.55f, active.backgroundAnchorY, 0f)
+    }
+
+    @Test fun outputSizeUsesPrimaryTimelineInputRatherThanPipInput() {
+        val settings = PipVideoCompositorSettings(plan())
+        val pipSize = Size(640, 360)
+        val primarySize = Size(1920, 1080)
+
+        assertEquals(primarySize, settings.getOutputSize(listOf(pipSize, primarySize)))
     }
 
     @Test fun primaryOrUnknownInputRemainsFullyVisible() {
