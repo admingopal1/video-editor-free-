@@ -505,7 +505,7 @@ fun buildComposition(
         sequences += sequence.build()
     }
     // Keep the primary timeline after PIP sequences so its compositor input ID matches the plan.
-    sequences += EditedMediaItemSequence(items)
+    sequences += EditedMediaItemSequence.Builder(items).build()
 
     val totalMs = clips.sumOf { it.outputMs }
     var loopUsed = false
@@ -538,7 +538,7 @@ fun buildComposition(
                 }
             }, emptyList()))
             .build()
-        sequences += EditedMediaItemSequence(audioItems, loop)
+        sequences += EditedMediaItemSequence.Builder(audioItems).setIsLooping(loop).build()
     }
     return Composition.Builder(sequences)
         .setVideoCompositorSettings(PipVideoCompositorSettings(pipPlan))
