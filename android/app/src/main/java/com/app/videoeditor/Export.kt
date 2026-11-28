@@ -30,6 +30,7 @@ import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.ChannelMixingAudioProcessor
 import androidx.media3.common.audio.ChannelMixingMatrix
 import androidx.media3.common.audio.SonicAudioProcessor
+import androidx.media3.common.audio.SpeedProvider
 import androidx.media3.effect.Brightness
 import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.Contrast
@@ -492,16 +493,20 @@ fun buildComposition(
             )
             .build()
         val audioProcessors = buildList {
-            if (!layer.muted && layer.speed != 1f) add(SonicAudioProcessor().apply { setSpeed(layer.speed) })
             if (!layer.muted && layer.volume != 1f) add(volumeProcessor(layer.volume))
         }
-        val videoEffects = if (layer.speed != 1f) listOf<Effect>(SpeedChangeEffect(layer.speed)) else emptyList()
-        sequence.addItem(
-            EditedMediaItem.Builder(mediaItem)
-                .setRemoveAudio(layer.muted)
-                .setEffects(Effects(audioProcessors, videoEffects))
-                .build()
-        )
+        val editedItemBuilder = EditedMediaItem.Builder(mediaItem)
+            .setRemoveAudio(layer.muted)
+            .setEffects(Effects(audioProcessors, emptyList()))
+        if (layer.speed != 1f) {
+            // Composition secondary sequences ignore legacy speed-changing video effects.
+            // Use EditedMediaItem.setSpeed so PIP video and optional audio share one clock.
+            editedItemBuilder.setSpeed(object : SpeedProvider {
+                override fun getSpeed(timeUs: Long): Float = layer.speed
+                override fun getNextSpeedChangeTimeUs(timeUs: Long): Long = C.TIME_UNSET
+            })
+        }
+        sequence.addItem(editedItemBuilder.build())
         sequences += sequence.build()
     }
     // Keep the primary timeline after PIP sequences so its compositor input ID matches the plan.
