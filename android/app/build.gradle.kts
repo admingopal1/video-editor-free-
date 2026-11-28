@@ -47,8 +47,8 @@ android {
 }
 
 dependencies {
-    // Keep all Media3 artifacts aligned; 1.8.1 provides multi-sequence compositor settings.
-    val media3 = "1.8.1"
+    // Keep all Media3 artifacts aligned; 1.9.4 provides explicit sequence track types and multi-sequence compositor settings.
+    val media3 = "1.9.4"
     implementation("androidx.media3:media3-exoplayer:$media3")
     implementation("androidx.media3:media3-transformer:$media3")
     implementation("androidx.media3:media3-effect:$media3")
