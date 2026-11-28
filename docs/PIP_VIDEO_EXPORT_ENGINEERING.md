@@ -72,3 +72,6 @@ Implement a verified multi-sequence composition path that:
 ## Implementation rule
 
 Do not weaken `EditorViewModel.preflight()` until the compositor and audio mixer pass the acceptance tests. A visible warning is preferable to an export that silently omits PIP video or audio.
+
+
+Dependency compatibility note: the compositor adapter requires `VideoCompositorSettings`; Media3 1.5.1 does not expose this API. The project is being aligned to Media3 1.8.1 for validation. Video-PIP export remains guarded until real rendered output and audio tests pass.
