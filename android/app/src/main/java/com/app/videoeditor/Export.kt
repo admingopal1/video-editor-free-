@@ -23,6 +23,7 @@ import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import android.text.style.TypefaceSpan
 import androidx.media3.common.Effect
+import androidx.media3.common.OverlaySettings
 import androidx.media3.common.MediaItem
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.ChannelMixingAudioProcessor
@@ -36,7 +37,7 @@ import androidx.media3.effect.FrameDropEffect
 import androidx.media3.effect.HslAdjustment
 import androidx.media3.effect.MatrixTransformation
 import androidx.media3.effect.OverlayEffect
-import androidx.media3.effect.OverlaySettings
+import androidx.media3.effect.StaticOverlaySettings
 import androidx.media3.effect.Presentation
 import androidx.media3.effect.RgbAdjustment
 import androidx.media3.effect.RgbFilter
@@ -98,7 +99,7 @@ private class TimedBitmapOverlay(
 
     override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings {
         val visible = presentationTimeUs >= startUs && presentationTimeUs < endUs
-        return OverlaySettings.Builder()
+        return StaticOverlaySettings.Builder()
             .setBackgroundFrameAnchor(layer.x, layer.y)
             .setOverlayFrameAnchor(0f, 0f)
             .setScale(layer.scale, layer.scale)
