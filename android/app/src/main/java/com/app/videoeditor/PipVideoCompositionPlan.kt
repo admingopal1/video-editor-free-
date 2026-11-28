@@ -55,6 +55,12 @@ internal fun isPipVideoInputVisible(
 ): Boolean = presentationTimeUs >= input.timelineStartUs &&
     presentationTimeUs < input.timelineEndUs
 
-/** The primary sequence is deliberately the final video input. */
+/** The first PIP sequence drives the compositor clock and must span the whole project. */
+internal fun pipPrimaryTrailingGapUs(
+    firstPipInput: PipVideoInputPlan,
+    projectDurationUs: Long
+): Long = (projectDurationUs - firstPipInput.timelineEndUs).coerceAtLeast(0L)
+
+/** The primary timeline sequence is deliberately the final video input. */
 internal fun pipPrimaryInputIndex(primaryInputId: Int, inputCount: Int): Int =
     if (inputCount <= 0) -1 else primaryInputId.coerceIn(0, inputCount - 1)

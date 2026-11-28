@@ -85,6 +85,17 @@ class PipVideoCompositionPlanTest {
     }
 
     @Test
+    fun firstPipSequenceGetsTrailingGapToCoverFullProjectClock() {
+        val input = buildPipVideoCompositionPlan(
+            listOf(layer(41L, 0, timelineStartMs = 2_000L))
+        ).videoInputs.single()
+
+        assertEquals(4_000_000L, pipPrimaryTrailingGapUs(input, 10_000_000L))
+        assertEquals(0L, pipPrimaryTrailingGapUs(input, 6_000_000L))
+        assertEquals(0L, pipPrimaryTrailingGapUs(input, 5_000_000L))
+    }
+
+    @Test
     fun compositorVisibilityHidesLeadingAndTrailingGapFrames() {
         val input = buildPipVideoCompositionPlan(
             listOf(layer(40L, 0, timelineStartMs = 2_000L))

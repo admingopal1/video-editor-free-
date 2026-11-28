@@ -468,7 +468,11 @@ fun buildComposition(
         }
         builder.setEffects(Effects(buildAudioProcessors(c), buildVideoEffects(c, presentation, true, fps, overlayLayers = overlayLayers, clipTimelineStartMs = clipStartMs, overlayContext = ctx))).build()
     }
-    // Media3 compositor input order is foreground layers first, primary video last.
+    val totalMs = clips.sumOf { it.outputMs }
+    val totalDurationUs = if (totalMs > Long.MAX_VALUE / 1_000L) Long.MAX_VALUE else totalMs * 1_000L
+    // Media3 uses the first sequence as the compositor clock and draws it in front.
+    // Put foreground PIPs first, the base timeline last, and extend the first PIP
+    // with a transparent trailing gap so its primary clock spans the whole project.
     // This remains behind the ViewModel preflight guard until rendered-output acceptance tests pass.
     val pipPlan = buildPipVideoCompositionPlan(overlayLayers)
     val sequences = mutableListOf<EditedMediaItemSequence>()
@@ -508,12 +512,15 @@ fun buildComposition(
             })
         }
         sequence.addItem(editedItemBuilder.build())
+        if (input.inputId == 0) {
+            val trailingGapUs = pipPrimaryTrailingGapUs(input, totalDurationUs)
+            if (trailingGapUs > 0L) sequence.addGap(trailingGapUs)
+        }
         sequences += sequence.build()
     }
     // Keep the primary timeline after PIP sequences so its compositor input ID matches the plan.
     sequences += EditedMediaItemSequence.Builder(items).build()
 
-    val totalMs = clips.sumOf { it.outputMs }
     var loopUsed = false
     val soloActive = tracks.any { it.solo && !it.muted }
     for (t in tracks) {
