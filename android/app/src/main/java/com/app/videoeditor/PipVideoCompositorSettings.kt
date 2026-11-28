@@ -30,7 +30,12 @@ internal fun pipOverlayTransform(input: PipVideoInputPlan?, presentationTimeUs: 
     )
 }
 
-/** Layout adapter for multi-sequence PIP export. Kept unwired until rendered-frame/audio acceptance passes. */
+/**
+ * Media3 multi-sequence compositor layout used by buildComposition().
+ *
+ * The mapping is covered by JVM tests. Rendered-frame and audio acceptance tests are
+ * still required before EditorViewModel.preflight() can allow PIP-video exports.
+ */
 class PipVideoCompositorSettings(private val plan: PipVideoCompositionPlan) : VideoCompositorSettings {
     override fun getOutputSize(inputSizes: List<Size>): Size {
         if (inputSizes.isEmpty()) return Size(1, 1)

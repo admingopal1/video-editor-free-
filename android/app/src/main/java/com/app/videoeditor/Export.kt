@@ -471,9 +471,9 @@ fun buildComposition(
     val totalMs = clips.sumOf { it.outputMs }
     val totalDurationUs = if (totalMs > Long.MAX_VALUE / 1_000L) Long.MAX_VALUE else totalMs * 1_000L
     // Media3 uses the first sequence as the compositor clock and draws it in front.
-    // Put foreground PIPs first, the base timeline last, and extend the first PIP
-    // with a transparent trailing gap so its primary clock spans the whole project.
-    // This remains behind the ViewModel preflight guard until rendered-output acceptance tests pass.
+    // Put foreground PIPs first and the base timeline last. Every PIP sequence is
+    // extended through project end; its compositor alpha is zero outside its own interval.
+    // Export remains behind the ViewModel preflight guard until rendered-output acceptance passes.
     val pipPlan = buildPipVideoCompositionPlan(overlayLayers)
     val sequences = mutableListOf<EditedMediaItemSequence>()
     pipPlan.videoInputs.forEach { input ->
