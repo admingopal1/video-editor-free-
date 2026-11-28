@@ -22,12 +22,15 @@ import android.text.style.BackgroundColorSpan
 import android.text.style.ForegroundColorSpan
 import android.text.style.StyleSpan
 import android.text.style.TypefaceSpan
+import androidx.media3.common.C
 import androidx.media3.common.Effect
+import androidx.media3.common.OverlaySettings
 import androidx.media3.common.MediaItem
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.audio.ChannelMixingAudioProcessor
 import androidx.media3.common.audio.ChannelMixingMatrix
 import androidx.media3.common.audio.SonicAudioProcessor
+import androidx.media3.common.audio.SpeedProvider
 import androidx.media3.effect.Brightness
 import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.Contrast
@@ -36,12 +39,13 @@ import androidx.media3.effect.FrameDropEffect
 import androidx.media3.effect.HslAdjustment
 import androidx.media3.effect.MatrixTransformation
 import androidx.media3.effect.OverlayEffect
-import androidx.media3.effect.OverlaySettings
+import androidx.media3.effect.StaticOverlaySettings
 import androidx.media3.effect.Presentation
 import androidx.media3.effect.RgbAdjustment
 import androidx.media3.effect.RgbFilter
 import androidx.media3.effect.RgbMatrix
 import androidx.media3.effect.ScaleAndRotateTransformation
+import androidx.media3.effect.SingleColorLut
 import androidx.media3.effect.SpeedChangeEffect
 import androidx.media3.effect.TextOverlay
 import androidx.media3.effect.TextureOverlay
@@ -97,7 +101,7 @@ private class TimedBitmapOverlay(
 
     override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings {
         val visible = presentationTimeUs >= startUs && presentationTimeUs < endUs
-        return OverlaySettings.Builder()
+        return StaticOverlaySettings.Builder()
             .setBackgroundFrameAnchor(layer.x, layer.y)
             .setOverlayFrameAnchor(0f, 0f)
             .setScale(layer.scale, layer.scale)
@@ -240,7 +244,7 @@ private fun timedOverlay(c: Clip, t: TextLayer): TextureOverlay {
 
         override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings {
             val r = textRender(t, total, tb.rel(presentationTimeUs))
-            return OverlaySettings.Builder()
+            return StaticOverlaySettings.Builder()
                 .setBackgroundFrameAnchor(t.x, r.y)
                 .setRotationDegrees(t.rotation)
                 .setScale(r.scale, r.scale)
@@ -257,7 +261,7 @@ private fun textOverlays(c: Clip): List<TextureOverlay> =
         } else {
             TextOverlay.createStaticTextOverlay(
                 styledText(t),
-                OverlaySettings.Builder()
+                StaticOverlaySettings.Builder()
                     .setBackgroundFrameAnchor(t.x, t.y)
                     .setRotationDegrees(t.rotation)
                     .setScale(t.scale, t.scale)
@@ -266,7 +270,7 @@ private fun textOverlays(c: Clip): List<TextureOverlay> =
         }
     }
 
-private fun addColorEffects(l: MutableList<Effect>, c: Clip) {
+private fun addColorEffects(l: MutableList<Effect>, c: Clip, context: Context? = null, strictLut: Boolean = false) {
     if (c.brightness != 0f) l += Brightness(c.brightness)
     if (c.contrast != 0f) l += Contrast(c.contrast)
     if (c.saturation != 0f || c.hue != 0f) {
@@ -276,6 +280,15 @@ private fun addColorEffects(l: MutableList<Effect>, c: Clip) {
         l += RgbAdjustment.Builder()
             .setRedScale(1f + 0.3f * c.warmth)
             .setBlueScale(1f - 0.3f * c.warmth)
+            .build()
+    }
+    val tintRedBlue = 1f + 0.12f * c.tint
+    val tintGreen = 1f - 0.12f * c.tint
+    if (c.redGain != 1f || c.greenGain != 1f || c.blueGain != 1f || c.tint != 0f) {
+        l += RgbAdjustment.Builder()
+            .setRedScale(c.redGain * tintRedBlue)
+            .setGreenScale(c.greenGain * tintGreen)
+            .setBlueScale(c.blueGain * tintRedBlue)
             .build()
     }
     when (c.filter) {
@@ -309,18 +322,59 @@ private fun addColorEffects(l: MutableList<Effect>, c: Clip) {
             l += Contrast(0.2f)
         }
     }
+    if (c.toneShadows != 0f || c.toneMidtones != 0f || c.toneHighlights != 0f) {
+        l += SingleColorLut.createFromCube(ToneCurve(c.toneShadows, c.toneMidtones, c.toneHighlights).toMedia3ArgbCube())
+    }
+    if (c.shadowsTemperature != 0f || c.shadowsTint != 0f ||
+        c.midtonesTemperature != 0f || c.midtonesTint != 0f ||
+        c.highlightsTemperature != 0f || c.highlightsTint != 0f
+    ) {
+        l += SingleColorLut.createFromCube(
+            ColorWheels(
+                c.shadowsTemperature, c.shadowsTint,
+                c.midtonesTemperature, c.midtonesTint,
+                c.highlightsTemperature, c.highlightsTint
+            ).toMedia3ArgbCube()
+        )
+    }
+    val rgbCurves = RgbCurves(
+        ToneCurve(c.redCurveShadows, c.redCurveMidtones, c.redCurveHighlights),
+        ToneCurve(c.greenCurveShadows, c.greenCurveMidtones, c.greenCurveHighlights),
+        ToneCurve(c.blueCurveShadows, c.blueCurveMidtones, c.blueCurveHighlights)
+    )
+    if (listOf(c.redCurveShadows, c.redCurveMidtones, c.redCurveHighlights, c.greenCurveShadows, c.greenCurveMidtones, c.greenCurveHighlights, c.blueCurveShadows, c.blueCurveMidtones, c.blueCurveHighlights).any { it != 0f }) {
+        l += SingleColorLut.createFromCube(rgbCurves.toMedia3ArgbCube())
+    }
+    val hslAdjustments = listOf(c.hslRed, c.hslOrange, c.hslYellow, c.hslGreen, c.hslAqua, c.hslBlue, c.hslPurple, c.hslMagenta)
+    if (hslAdjustments.any { it != 0f }) {
+        l += SingleColorLut.createFromCube(HslMixer(hslAdjustments).toMedia3ArgbCube())
+    }
+    c.lutUri?.let { uriString ->
+        try {
+            val ctx = context ?: throw IllegalStateException("LUT context is unavailable")
+            val bytes = ctx.contentResolver.openInputStream(Uri.parse(uriString))?.use { it.readBytes() }
+                ?: throw IllegalStateException("The selected LUT file is no longer accessible")
+            require(bytes.size <= 8 * 1024 * 1024) { "LUT file exceeds the 8 MiB limit" }
+            val cube = CubeLut.parse(bytes.toString(Charsets.UTF_8)).toMedia3ArgbCube(c.lutIntensity)
+            l += SingleColorLut.createFromCube(cube)
+        } catch (error: Exception) {
+            if (strictLut) throw IllegalStateException("Could not apply the selected 3D LUT: ${error.message}", error)
+            // Keep preview responsive if external storage permission has been revoked.
+        }
+    }
 }
 
 /**
  * GL effects used by the live preview: crop, colour adjustments and filter. Geometry, motion, fades and
  * text are drawn by Compose from the shared PreviewMath so they follow the timeline clock exactly.
  */
-fun buildPreviewGlEffects(c: Clip): List<Effect> {
+fun buildPreviewGlEffects(c: Clip, context: Context? = null): List<Effect> {
     val l = mutableListOf<Effect>()
     if (c.cropL > 0f || c.cropR > 0f || c.cropT > 0f || c.cropB > 0f) {
         l += Crop(-1f + 2f * c.cropL, 1f - 2f * c.cropR, -1f + 2f * c.cropB, 1f - 2f * c.cropT)
     }
-    addColorEffects(l, c)
+    addColorEffects(l, c, context, strictLut = false)
+    if (c.maskShape != ClipMaskShape.None) l += ClipMaskEffect(c.maskShape, c.maskCenterX, c.maskCenterY, c.maskWidth, c.maskHeight, c.maskFeather, c.maskInvert)
     return l
 }
 
@@ -343,10 +397,11 @@ fun buildVideoEffects(c: Clip, presentation: Presentation?, forExport: Boolean, 
     if (forExport) animEffect(c)?.let { l += it }
     l += kfEffects(c, kfFrac, forExport)
 
-    addColorEffects(l, c)
+    addColorEffects(l, c, overlayContext, strictLut = forExport)
     if (forExport) fadeEffect(c)?.let { l += it }
     if (forExport && fps > 0) l += FrameDropEffect.createDefaultFrameDropEffect(fps.toFloat())
     if (presentation != null) l += presentation
+    if (c.maskShape != ClipMaskShape.None) l += ClipMaskEffect(c.maskShape, c.maskCenterX, c.maskCenterY, c.maskWidth, c.maskHeight, c.maskFeather, c.maskInvert)
 
     if (forExport && overlayContext != null && overlayLayers.isNotEmpty()) {
         val imageOverlays = overlayLayers
@@ -377,8 +432,8 @@ fun buildAudioProcessors(c: Clip): List<AudioProcessor> {
 }
 
 fun volumeProcessor(v: Float): AudioProcessor = ChannelMixingAudioProcessor().apply {
-    putChannelMixingMatrix(ChannelMixingMatrix.create(1, 2).scaleBy(v))
-    putChannelMixingMatrix(ChannelMixingMatrix.create(2, 2).scaleBy(v))
+    putChannelMixingMatrix(ChannelMixingMatrix.createForConstantGain(1, 2).scaleBy(v))
+    putChannelMixingMatrix(ChannelMixingMatrix.createForConstantGain(2, 2).scaleBy(v))
 }
 
 fun buildComposition(
@@ -413,9 +468,59 @@ fun buildComposition(
         }
         builder.setEffects(Effects(buildAudioProcessors(c), buildVideoEffects(c, presentation, true, fps, overlayLayers = overlayLayers, clipTimelineStartMs = clipStartMs, overlayContext = ctx))).build()
     }
-    val sequences = mutableListOf(EditedMediaItemSequence(items))
-
     val totalMs = clips.sumOf { it.outputMs }
+    val totalDurationUs = if (totalMs > Long.MAX_VALUE / 1_000L) Long.MAX_VALUE else totalMs * 1_000L
+    // Media3 uses the first sequence as the compositor clock and draws it in front.
+    // Put foreground PIPs first and the base timeline last. Every PIP sequence is
+    // extended through project end; its compositor alpha is zero outside its own interval.
+    // Export remains behind the ViewModel preflight guard until rendered-output acceptance passes.
+    val pipPlan = buildPipVideoCompositionPlan(overlayLayers)
+    val sequences = mutableListOf<EditedMediaItemSequence>()
+    pipPlan.videoInputs.forEach { input ->
+        val layer = input.layer
+        val trackTypes = if (layer.muted) {
+            setOf(C.TRACK_TYPE_VIDEO)
+        } else {
+            setOf(C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_VIDEO)
+        }
+        val sequence = EditedMediaItemSequence.Builder(trackTypes)
+        if (input.timelineStartUs > 0L) {
+            // Reuse the plan's saturated conversion so extreme offsets cannot overflow.
+            sequence.addGap(input.timelineStartUs)
+        }
+        val mediaItem = MediaItem.Builder()
+            .setUri(Uri.parse(layer.uriString))
+            .setClippingConfiguration(
+                MediaItem.ClippingConfiguration.Builder()
+                    .setStartPositionMs(layer.startMs)
+                    .setEndPositionMs(layer.endMs)
+                    .build()
+            )
+            .build()
+        val audioProcessors = buildList {
+            if (!layer.muted && layer.volume != 1f) add(volumeProcessor(layer.volume))
+        }
+        val editedItemBuilder = EditedMediaItem.Builder(mediaItem)
+            .setRemoveAudio(layer.muted)
+            .setEffects(Effects(audioProcessors, emptyList()))
+        if (layer.speed != 1f) {
+            // Composition secondary sequences ignore legacy speed-changing video effects.
+            // Use EditedMediaItem.setSpeed so PIP video and optional audio share one clock.
+            editedItemBuilder.setSpeed(object : SpeedProvider {
+                override fun getSpeed(timeUs: Long): Float = layer.speed
+                override fun getNextSpeedChangeTimeUs(timeUs: Long): Long = C.TIME_UNSET
+            })
+        }
+        sequence.addItem(editedItemBuilder.build())
+        // Every secondary stream must keep emitting frames through the project end.
+        // Otherwise Media3 may reuse its final visible frame after this PIP's interval.
+        val trailingGapUs = pipVideoTrailingGapUs(input, totalDurationUs)
+        if (trailingGapUs > 0L) sequence.addGap(trailingGapUs)
+        sequences += sequence.build()
+    }
+    // Keep the primary timeline after PIP sequences so its compositor input ID matches the plan.
+    sequences += EditedMediaItemSequence.Builder(items).build()
+
     var loopUsed = false
     val soloActive = tracks.any { it.solo && !it.muted }
     for (t in tracks) {
@@ -446,9 +551,10 @@ fun buildComposition(
                 }
             }, emptyList()))
             .build()
-        sequences += EditedMediaItemSequence(audioItems, loop)
+        sequences += EditedMediaItemSequence.Builder(audioItems).setIsLooping(loop).build()
     }
     return Composition.Builder(sequences)
+        .setVideoCompositorSettings(PipVideoCompositorSettings(pipPlan))
         .experimentalSetForceAudioTrack(true)
         .build()
 }

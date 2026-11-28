@@ -15,6 +15,8 @@ enum class Anim(val label: String) {
 
 enum class Ease(val label: String) { Linear("Linear"), Smooth("Smooth") }
 
+enum class ClipMaskShape { None, Rectangle, Ellipse }
+
 /** A transform keyframe. t is 0..1 of the clip's (output) duration. x,y in -1..1 frame units. */
 data class Keyframe(
     val t: Float,
@@ -377,6 +379,31 @@ data class TextLayer(
 data class ProjectInfo(val id: String, val name: String, val updated: Long, val clipCount: Int, val durationMs: Long)
 
 /** Pure validation keeps malformed clip metadata from poisoning project recovery. */
+fun isValidColorChannelGain(red: Float, green: Float, blue: Float): Boolean =
+    listOf(red, green, blue).all { it.isFinite() && it in 0.5f..1.5f }
+
+fun isValidTint(tint: Float): Boolean = tint.isFinite() && tint in -1f..1f
+
+fun isValidToneCurve(shadows: Float, midtones: Float, highlights: Float): Boolean =
+    listOf(shadows, midtones, highlights).all { it.isFinite() && it in -0.2f..0.2f }
+
+fun isValidLutIntensity(intensity: Float): Boolean = intensity.isFinite() && intensity in 0f..1f
+
+fun isValidRgbCurves(values: List<Float>): Boolean =
+    values.size == 9 && values.all { it.isFinite() && it in -0.2f..0.2f }
+
+fun isValidHslMixer(adjustments: List<Float>): Boolean =
+    adjustments.size == 8 && adjustments.all { it.isFinite() && it in -1f..1f }
+
+fun isValidColorWheels(
+    shadowsTemperature: Float, shadowsTint: Float,
+    midtonesTemperature: Float, midtonesTint: Float,
+    highlightsTemperature: Float, highlightsTint: Float
+): Boolean = listOf(
+    shadowsTemperature, shadowsTint, midtonesTemperature, midtonesTint,
+    highlightsTemperature, highlightsTint
+).all { it.isFinite() && it in -1f..1f }
+
 fun isValidProjectClipMetadata(
     id: Long,
     uriString: String,
@@ -388,7 +415,20 @@ fun isValidProjectClipMetadata(
     speed: Float,
     volume: Float,
     zoom: Float,
-    adjustments: List<Float>
+    adjustments: List<Float>,
+    redGain: Float = 1f,
+    greenGain: Float = 1f,
+    blueGain: Float = 1f,
+    tint: Float = 0f,
+    shadowsTemperature: Float = 0f,
+    shadowsTint: Float = 0f,
+    midtonesTemperature: Float = 0f,
+    midtonesTint: Float = 0f,
+    highlightsTemperature: Float = 0f,
+    highlightsTint: Float = 0f,
+    hslMixer: List<Float> = List(8) { 0f },
+    rgbCurves: List<Float> = List(9) { 0f },
+    lutIntensity: Float = 1f
 ): Boolean =
     id > 0L &&
         uriString.isNotBlank() &&
@@ -398,12 +438,30 @@ fun isValidProjectClipMetadata(
         speed > 0f && speed.isFinite() &&
         volume >= 0f && volume.isFinite() &&
         zoom > 0f && zoom.isFinite() &&
-        adjustments.all { it.isFinite() }
+        adjustments.all { it.isFinite() } &&
+        isValidColorChannelGain(redGain, greenGain, blueGain) &&
+        isValidTint(tint) &&
+        isValidColorWheels(shadowsTemperature, shadowsTint, midtonesTemperature, midtonesTint, highlightsTemperature, highlightsTint) &&
+        isValidHslMixer(hslMixer) &&
+        isValidRgbCurves(rgbCurves) &&
+        isValidLutIntensity(lutIntensity)
+
+fun isValidClipMask(shape: ClipMaskShape, centerX: Float, centerY: Float, width: Float, height: Float, feather: Float): Boolean =
+    centerX.isFinite() && centerX in 0f..1f &&
+    centerY.isFinite() && centerY in 0f..1f &&
+    width.isFinite() && width in 0.05f..1.5f &&
+    height.isFinite() && height in 0.05f..1.5f &&
+    feather.isFinite() && feather in 0f..0.25f
 
 fun Clip.isValidProjectClip(): Boolean = isValidProjectClipMetadata(
     id, uri.toString(), durationMs, width, height, startMs, endMs, speed, volume, zoom,
-    listOf(cropL, cropR, cropT, cropB, brightness, contrast, saturation, warmth, hue)
-)
+    listOf(cropL, cropR, cropT, cropB, brightness, contrast, saturation, warmth, hue),
+    redGain, greenGain, blueGain, tint,
+    shadowsTemperature, shadowsTint, midtonesTemperature, midtonesTint, highlightsTemperature, highlightsTint,
+    listOf(hslRed, hslOrange, hslYellow, hslGreen, hslAqua, hslBlue, hslPurple, hslMagenta),
+    listOf(redCurveShadows, redCurveMidtones, redCurveHighlights, greenCurveShadows, greenCurveMidtones, greenCurveHighlights, blueCurveShadows, blueCurveMidtones, blueCurveHighlights),
+    lutIntensity
+) && isValidClipMask(maskShape, maskCenterX, maskCenterY, maskWidth, maskHeight, maskFeather)
 
 data class Clip(
     val id: Long,
@@ -429,7 +487,55 @@ data class Clip(
     val contrast: Float = 0f,
     val saturation: Float = 0f,
     val warmth: Float = 0f,
+    /** Green-to-magenta tint adjustment; zero is neutral. */
+    val tint: Float = 0f,
     val hue: Float = 0f,
+    /** Per-channel color balance gains; 1.0 is neutral. */
+    val redGain: Float = 1f,
+    val greenGain: Float = 1f,
+    val blueGain: Float = 1f,
+    /** Master tonal curve control points; zero values preserve the identity curve. */
+    val toneShadows: Float = 0f,
+    val toneMidtones: Float = 0f,
+    val toneHighlights: Float = 0f,
+    /** Three-way tonal color wheels; temperature is blue↔amber, tint is green↔magenta. */
+    val shadowsTemperature: Float = 0f,
+    val shadowsTint: Float = 0f,
+    val midtonesTemperature: Float = 0f,
+    val midtonesTint: Float = 0f,
+    val highlightsTemperature: Float = 0f,
+    val highlightsTint: Float = 0f,
+    /** Per-hue saturation offsets; zero is neutral. Order: red, orange, yellow, green, aqua, blue, purple, magenta. */
+    val hslRed: Float = 0f,
+    val hslOrange: Float = 0f,
+    val hslYellow: Float = 0f,
+    val hslGreen: Float = 0f,
+    val hslAqua: Float = 0f,
+    val hslBlue: Float = 0f,
+    val hslPurple: Float = 0f,
+    val hslMagenta: Float = 0f,
+    /** Per-channel RGB curve controls: shadows, midtones, highlights. Zero is identity. */
+    val redCurveShadows: Float = 0f,
+    val redCurveMidtones: Float = 0f,
+    val redCurveHighlights: Float = 0f,
+    val greenCurveShadows: Float = 0f,
+    val greenCurveMidtones: Float = 0f,
+    val greenCurveHighlights: Float = 0f,
+    val blueCurveShadows: Float = 0f,
+    val blueCurveMidtones: Float = 0f,
+    val blueCurveHighlights: Float = 0f,
+    /** Persisted document URI for an optional 3D .cube color LUT. */
+    val lutUri: String? = null,
+    /** Blend between original image and imported LUT output; 0 disables the look, 1 is full strength. */
+    val lutIntensity: Float = 1f,
+    /** Non-destructive clip mask; defaults preserve legacy projects. */
+    val maskShape: ClipMaskShape = ClipMaskShape.None,
+    val maskCenterX: Float = 0.5f,
+    val maskCenterY: Float = 0.5f,
+    val maskWidth: Float = 0.8f,
+    val maskHeight: Float = 0.8f,
+    val maskFeather: Float = 0.02f,
+    val maskInvert: Boolean = false,
     val filter: Filter = Filter.None,
     val anim: Anim = Anim.None,
     val fadeInMs: Long = 0L,
@@ -458,7 +564,22 @@ fun Clip.toJson(): JSONObject = JSONObject().apply {
     put("rot", rotation); put("fh", flipH); put("fv", flipV); put("zoom", zoom.toDouble())
     put("cl", cropL.toDouble()); put("cr", cropR.toDouble()); put("ct", cropT.toDouble()); put("cb", cropB.toDouble())
     put("br", brightness.toDouble()); put("co", contrast.toDouble()); put("sa", saturation.toDouble())
-    put("wa", warmth.toDouble()); put("hue", hue.toDouble())
+    put("wa", warmth.toDouble()); put("tint", tint.toDouble()); put("hue", hue.toDouble())
+    put("rg", redGain.toDouble()); put("gg", greenGain.toDouble()); put("bgain", blueGain.toDouble()); put("toneSh", toneShadows.toDouble()); put("toneMid", toneMidtones.toDouble()); put("toneHi", toneHighlights.toDouble())
+    put("shTemp", shadowsTemperature.toDouble()); put("shTint", shadowsTint.toDouble())
+    put("midTemp", midtonesTemperature.toDouble()); put("midTint", midtonesTint.toDouble())
+    put("hiTemp", highlightsTemperature.toDouble()); put("hiTint", highlightsTint.toDouble())
+    put("hslR", hslRed.toDouble()); put("hslO", hslOrange.toDouble())
+    put("hslY", hslYellow.toDouble()); put("hslG", hslGreen.toDouble())
+    put("hslA", hslAqua.toDouble()); put("hslB", hslBlue.toDouble())
+    put("hslP", hslPurple.toDouble()); put("hslM", hslMagenta.toDouble())
+    put("rcs", redCurveShadows.toDouble()); put("rcm", redCurveMidtones.toDouble()); put("rch", redCurveHighlights.toDouble())
+    put("gcs", greenCurveShadows.toDouble()); put("gcm", greenCurveMidtones.toDouble()); put("gch", greenCurveHighlights.toDouble())
+    put("bcs", blueCurveShadows.toDouble()); put("bcm", blueCurveMidtones.toDouble()); put("bch", blueCurveHighlights.toDouble())
+    put("lutUri", lutUri ?: JSONObject.NULL)
+    put("lutIntensity", lutIntensity.toDouble())
+    put("maskShape", maskShape.name); put("maskX", maskCenterX.toDouble()); put("maskY", maskCenterY.toDouble())
+    put("maskW", maskWidth.toDouble()); put("maskH", maskHeight.toDouble()); put("maskFeather", maskFeather.toDouble()); put("maskInvert", maskInvert)
     put("filter", filter.name); put("anim", anim.name); put("fin", fadeInMs); put("fout", fadeOutMs)
     put("audioEq", JSONArray().apply { audioEqGainsDb.forEach { put(it.toDouble()) } })
     put("audioFadeIn", audioFadeInMs.coerceAtLeast(0L)); put("audioFadeOut", audioFadeOutMs.coerceAtLeast(0L))
@@ -523,7 +644,43 @@ fun clipFromJson(o: JSONObject): Clip {
         cropT = o.optDouble("ct", 0.0).toFloat(), cropB = o.optDouble("cb", 0.0).toFloat(),
         brightness = o.optDouble("br", 0.0).toFloat(), contrast = o.optDouble("co", 0.0).toFloat(),
         saturation = o.optDouble("sa", 0.0).toFloat(), warmth = o.optDouble("wa", 0.0).toFloat(),
+        tint = o.optDouble("tint", 0.0).toFloat(),
         hue = o.optDouble("hue", 0.0).toFloat(),
+        redGain = o.optDouble("rg", 1.0).toFloat(),
+        greenGain = o.optDouble("gg", 1.0).toFloat(),
+        blueGain = o.optDouble("bgain", 1.0).toFloat(),
+        toneShadows = o.optDouble("toneSh", 0.0).toFloat(),
+        toneMidtones = o.optDouble("toneMid", 0.0).toFloat(),
+        toneHighlights = o.optDouble("toneHi", 0.0).toFloat(),
+        shadowsTemperature = o.optDouble("shTemp", 0.0).toFloat(),
+        shadowsTint = o.optDouble("shTint", 0.0).toFloat(),
+        midtonesTemperature = o.optDouble("midTemp", 0.0).toFloat(),
+        midtonesTint = o.optDouble("midTint", 0.0).toFloat(),
+        highlightsTemperature = o.optDouble("hiTemp", 0.0).toFloat(),
+        highlightsTint = o.optDouble("hiTint", 0.0).toFloat(),
+        hslRed = o.optDouble("hslR", 0.0).toFloat(),
+        hslOrange = o.optDouble("hslO", 0.0).toFloat(),
+        hslYellow = o.optDouble("hslY", 0.0).toFloat(),
+        hslGreen = o.optDouble("hslG", 0.0).toFloat(),
+        hslAqua = o.optDouble("hslA", 0.0).toFloat(),
+        hslBlue = o.optDouble("hslB", 0.0).toFloat(),
+        hslPurple = o.optDouble("hslP", 0.0).toFloat(),
+        hslMagenta = o.optDouble("hslM", 0.0).toFloat(),
+        redCurveShadows = o.optDouble("rcs", 0.0).toFloat(),
+        redCurveMidtones = o.optDouble("rcm", 0.0).toFloat(),
+        redCurveHighlights = o.optDouble("rch", 0.0).toFloat(),
+        greenCurveShadows = o.optDouble("gcs", 0.0).toFloat(),
+        greenCurveMidtones = o.optDouble("gcm", 0.0).toFloat(),
+        greenCurveHighlights = o.optDouble("gch", 0.0).toFloat(),
+        blueCurveShadows = o.optDouble("bcs", 0.0).toFloat(),
+        blueCurveMidtones = o.optDouble("bcm", 0.0).toFloat(),
+        blueCurveHighlights = o.optDouble("bch", 0.0).toFloat(),
+        lutUri = o.optString("lutUri").takeIf { it.isNotBlank() && it != "null" },
+        lutIntensity = o.optDouble("lutIntensity", 1.0).toFloat(),
+        maskShape = runCatching { ClipMaskShape.valueOf(o.optString("maskShape", "None")) }.getOrDefault(ClipMaskShape.None),
+        maskCenterX = o.optDouble("maskX", 0.5).toFloat(), maskCenterY = o.optDouble("maskY", 0.5).toFloat(),
+        maskWidth = o.optDouble("maskW", 0.8).toFloat(), maskHeight = o.optDouble("maskH", 0.8).toFloat(),
+        maskFeather = o.optDouble("maskFeather", 0.02).toFloat(), maskInvert = o.optBoolean("maskInvert", false),
         filter = runCatching { Filter.valueOf(o.getString("filter")) }.getOrDefault(Filter.None),
         anim = runCatching { Anim.valueOf(o.getString("anim")) }.getOrDefault(Anim.None),
         fadeInMs = o.optLong("fin", 0L), fadeOutMs = o.optLong("fout", 0L), layers = layers,

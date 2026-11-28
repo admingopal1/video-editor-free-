@@ -4,6 +4,7 @@ package com.app.videoeditor
 
 import android.Manifest
 import android.content.Intent
+import android.widget.Toast
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Typeface
@@ -88,7 +89,7 @@ import kotlin.math.abs
 
 enum class Tool(val title: String) {
     Speed("Speed"), Volume("Volume"), Animate("Animation"), Fade("Fade"), Filters("Filters"),
-    Adjust("Adjust"), Crop("Crop"), Transform("Transform"), Text("Text"), Stickers("Stickers"),
+    Adjust("Adjust"), Mask("Mask"), Crop("Crop"), Transform("Transform"), Text("Text"), Stickers("Stickers"),
     Canvas("Canvas & export"), Audio("Audio"), Keyframes("Keyframes"), Transition("Transition")
 }
 
@@ -162,6 +163,22 @@ fun EditorScreen(vm: EditorViewModel) {
         if (u != null) {
             runCatching { ctx.contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
             vm.addOverlayImage(u)
+        }
+    }
+    val pickLut = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
+        val targetId = clip?.id
+        if (u != null && targetId != null) {
+            runCatching { ctx.contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            try {
+                val bytes = ctx.contentResolver.openInputStream(u)?.use { it.readBytes() }
+                    ?: throw IllegalArgumentException("Could not read this LUT file")
+                require(bytes.size <= 8 * 1024 * 1024) { "LUT file must be 8 MiB or smaller" }
+                CubeLut.parse(bytes.toString(Charsets.UTF_8))
+                vm.update(targetId) { it.copy(lutUri = u.toString()) }
+                Toast.makeText(ctx, "3D LUT applied to video clip", Toast.LENGTH_SHORT).show()
+            } catch (error: Exception) {
+                Toast.makeText(ctx, "Invalid LUT: ${error.message ?: "file could not be read"}", Toast.LENGTH_LONG).show()
+            }
         }
     }
     val pickOverlayVideo = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
@@ -308,7 +325,7 @@ fun EditorScreen(vm: EditorViewModel) {
                 )
             } else {
                 ToolSheet(t, onDone = { tool = null }) {
-                    ToolPanel(vm, t, clip, pos, kfSel, { kfSel = it }, { pickAudio.launch(arrayOf("audio/*")) }, { recordVoice() })
+                    ToolPanel(vm, t, clip, pos, kfSel, { kfSel = it }, { pickAudio.launch(arrayOf("audio/*")) }, { recordVoice() }, { pickLut.launch(arrayOf("*/*")) })
                 }
             }
         }
@@ -1102,6 +1119,7 @@ private fun Toolbar(vm: EditorViewModel, clip: Clip?, openTool: (Tool) -> Unit, 
             TB(Ic.Transition, "Transition", Pal.cyan, has) { openTool(Tool.Transition) }
             TB(Ic.Filters, "Filters", Pal.pink, has) { openTool(Tool.Filters) }
             TB(Ic.Sliders, "Adjust", Pal.violet, has) { openTool(Tool.Adjust) }
+            TB(Ic.Crop, "Mask", Pal.pink, vid) { openTool(Tool.Mask) }
             TB(Ic.Crop, "Crop", Pal.cyan, has) { openTool(Tool.Crop) }
             TB(Ic.Rotate, "Transform", Pal.mint, has) { openTool(Tool.Transform) }
             TB(Ic.TextT, "Text", Pal.pink, has) { openTool(Tool.Text) }
@@ -1157,7 +1175,7 @@ private fun Slide(label: String, value: Float, range: ClosedFloatingPointRange<F
 @Composable
 private fun ToolPanel(
     vm: EditorViewModel, tool: Tool, c: Clip?, pos: Long, kfSel: Int, onKfSel: (Int) -> Unit,
-    pickAudio: () -> Unit, record: () -> Unit
+    pickAudio: () -> Unit, record: () -> Unit, pickLut: () -> Unit
 ) {
     if (tool == Tool.Canvas) { CanvasPanel(vm); return }
     if (tool == Tool.Audio) { AudioPanel(vm, pickAudio, record); return }
@@ -1243,10 +1261,128 @@ private fun ToolPanel(
             Slide("Contrast", c.contrast, -0.5f..0.5f, f2(c.contrast)) { v -> vm.update(id) { it.copy(contrast = v) } }
             Slide("Saturation", c.saturation, -1f..1f, f2(c.saturation)) { v -> vm.update(id) { it.copy(saturation = v) } }
             Slide("Warmth", c.warmth, -1f..1f, f2(c.warmth)) { v -> vm.update(id) { it.copy(warmth = v) } }
+            Slide("Tint · Green ↔ Magenta", c.tint, -1f..1f, f2(c.tint)) { v -> vm.update(id) { it.copy(tint = v) } }
             Slide("Hue", c.hue, -1f..1f, f2(c.hue)) { v -> vm.update(id) { it.copy(hue = v) } }
+            Text("Master tone curve", fontWeight = FontWeight.SemiBold)
+            Text("Shape shadows, midtones and highlights with a GPU tone curve. Video clips only in this version.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            Slide("Shadows", c.toneShadows, -0.2f..0.2f, f2(c.toneShadows)) { v -> vm.update(id) { it.copy(toneShadows = v) } }
+            Slide("Midtones", c.toneMidtones, -0.2f..0.2f, f2(c.toneMidtones)) { v -> vm.update(id) { it.copy(toneMidtones = v) } }
+            Slide("Highlights", c.toneHighlights, -0.2f..0.2f, f2(c.toneHighlights)) { v -> vm.update(id) { it.copy(toneHighlights = v) } }
+            Text("RGB channel curves", fontWeight = FontWeight.SemiBold)
+            Text("Shape shadows, midtones and highlights independently for red, green and blue. Smooth GPU curves are shared by preview and export.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            if (!c.isImage) {
+                Text("Red channel", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                Slide("Red shadows", c.redCurveShadows, -0.2f..0.2f, f2(c.redCurveShadows)) { v -> vm.update(id) { it.copy(redCurveShadows = v) } }
+                Slide("Red midtones", c.redCurveMidtones, -0.2f..0.2f, f2(c.redCurveMidtones)) { v -> vm.update(id) { it.copy(redCurveMidtones = v) } }
+                Slide("Red highlights", c.redCurveHighlights, -0.2f..0.2f, f2(c.redCurveHighlights)) { v -> vm.update(id) { it.copy(redCurveHighlights = v) } }
+                Text("Green channel", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                Slide("Green shadows", c.greenCurveShadows, -0.2f..0.2f, f2(c.greenCurveShadows)) { v -> vm.update(id) { it.copy(greenCurveShadows = v) } }
+                Slide("Green midtones", c.greenCurveMidtones, -0.2f..0.2f, f2(c.greenCurveMidtones)) { v -> vm.update(id) { it.copy(greenCurveMidtones = v) } }
+                Slide("Green highlights", c.greenCurveHighlights, -0.2f..0.2f, f2(c.greenCurveHighlights)) { v -> vm.update(id) { it.copy(greenCurveHighlights = v) } }
+                Text("Blue channel", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+                Slide("Blue shadows", c.blueCurveShadows, -0.2f..0.2f, f2(c.blueCurveShadows)) { v -> vm.update(id) { it.copy(blueCurveShadows = v) } }
+                Slide("Blue midtones", c.blueCurveMidtones, -0.2f..0.2f, f2(c.blueCurveMidtones)) { v -> vm.update(id) { it.copy(blueCurveMidtones = v) } }
+                Slide("Blue highlights", c.blueCurveHighlights, -0.2f..0.2f, f2(c.blueCurveHighlights)) { v -> vm.update(id) { it.copy(blueCurveHighlights = v) } }
+            } else {
+                Text("RGB channel curves are currently available for video clips; photo preview support will follow.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            }
+            Text("Three-way color wheels", fontWeight = FontWeight.SemiBold)
+            Text("Grade shadows, midtones and highlights independently. Temperature shifts blue ↔ amber; tint shifts green ↔ magenta. GPU grading applies to video clips.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            Text("Shadows", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+            Slide("Shadow temperature", c.shadowsTemperature, -1f..1f, f2(c.shadowsTemperature)) { v -> vm.update(id) { it.copy(shadowsTemperature = v) } }
+            Slide("Shadow tint", c.shadowsTint, -1f..1f, f2(c.shadowsTint)) { v -> vm.update(id) { it.copy(shadowsTint = v) } }
+            Text("Midtones", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+            Slide("Midtone temperature", c.midtonesTemperature, -1f..1f, f2(c.midtonesTemperature)) { v -> vm.update(id) { it.copy(midtonesTemperature = v) } }
+            Slide("Midtone tint", c.midtonesTint, -1f..1f, f2(c.midtonesTint)) { v -> vm.update(id) { it.copy(midtonesTint = v) } }
+            Text("Highlights", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+            Slide("Highlight temperature", c.highlightsTemperature, -1f..1f, f2(c.highlightsTemperature)) { v -> vm.update(id) { it.copy(highlightsTemperature = v) } }
+            Slide("Highlight tint", c.highlightsTint, -1f..1f, f2(c.highlightsTint)) { v -> vm.update(id) { it.copy(highlightsTint = v) } }
+            Text("HSL color mixer", fontWeight = FontWeight.SemiBold)
+            Text("Adjust saturation by color family with smooth hue transitions. GPU processing is available for video clips.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            if (!c.isImage) {
+                listOf(
+                    "Red" to c.hslRed, "Orange" to c.hslOrange, "Yellow" to c.hslYellow, "Green" to c.hslGreen,
+                    "Aqua" to c.hslAqua, "Blue" to c.hslBlue, "Purple" to c.hslPurple, "Magenta" to c.hslMagenta
+                ).forEachIndexed { index, entry ->
+                    Slide(entry.first, entry.second, -1f..1f, String.format(Locale.US, "%+.0f%%", entry.second * 100f)) { value ->
+                        vm.update(id) { clip ->
+                            when (index) {
+                                0 -> clip.copy(hslRed = value)
+                                1 -> clip.copy(hslOrange = value)
+                                2 -> clip.copy(hslYellow = value)
+                                3 -> clip.copy(hslGreen = value)
+                                4 -> clip.copy(hslAqua = value)
+                                5 -> clip.copy(hslBlue = value)
+                                6 -> clip.copy(hslPurple = value)
+                                else -> clip.copy(hslMagenta = value)
+                            }
+                        }
+                    }
+                }
+            } else {
+                Text("HSL mixer is currently available for video clips; photo support will be added with matching preview processing.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            }
+            Text("3D color LUT", fontWeight = FontWeight.SemiBold)
+            Text("Import a .cube look-up table for GPU-based video grading. LUTs are stored with the project; photos are not supported in this first integration.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Button(onClick = pickLut, enabled = !c.isImage) { Text(if (c.lutUri == null) "Import .cube LUT" else "Replace LUT") }
+                if (c.lutUri != null) TextButton(onClick = { vm.update(id) { it.copy(lutUri = null) } }) { Text("Remove") }
+            }
+            if (c.lutUri != null) {
+                Text("LUT attached", color = Pal.mint, style = MaterialTheme.typography.bodySmall)
+                Slide("LUT strength", c.lutIntensity, 0f..1f, "${(c.lutIntensity * 100f).toInt()}%") { value ->
+                    vm.update(id) { it.copy(lutIntensity = value.coerceIn(0f, 1f)) }
+                }
+                Text("0% keeps the original grade; 100% applies the imported LUT fully.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            }
+            Text("RGB channel balance", fontWeight = FontWeight.SemiBold)
+            Text("Fine-tune red, green and blue independently. 100% is neutral.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            Slide("Red", c.redGain, 0.5f..1.5f, "${(c.redGain * 100).toInt()}%") { v -> vm.update(id) { it.copy(redGain = v) } }
+            Slide("Green", c.greenGain, 0.5f..1.5f, "${(c.greenGain * 100).toInt()}%") { v -> vm.update(id) { it.copy(greenGain = v) } }
+            Slide("Blue", c.blueGain, 0.5f..1.5f, "${(c.blueGain * 100).toInt()}%") { v -> vm.update(id) { it.copy(blueGain = v) } }
             OutlinedButton(onClick = {
-                vm.update(id) { it.copy(brightness = 0f, contrast = 0f, saturation = 0f, warmth = 0f, hue = 0f) }
+                vm.update(id) {
+                    it.copy(
+                        brightness = 0f, contrast = 0f, saturation = 0f, warmth = 0f, tint = 0f, hue = 0f,
+                        redGain = 1f, greenGain = 1f, blueGain = 1f,
+                        toneShadows = 0f, toneMidtones = 0f, toneHighlights = 0f,
+                        shadowsTemperature = 0f, shadowsTint = 0f,
+                        midtonesTemperature = 0f, midtonesTint = 0f,
+                        highlightsTemperature = 0f, highlightsTint = 0f,
+                        hslRed = 0f, hslOrange = 0f, hslYellow = 0f, hslGreen = 0f,
+                        hslAqua = 0f, hslBlue = 0f, hslPurple = 0f, hslMagenta = 0f,
+                        redCurveShadows = 0f, redCurveMidtones = 0f, redCurveHighlights = 0f,
+                        greenCurveShadows = 0f, greenCurveMidtones = 0f, greenCurveHighlights = 0f,
+                        blueCurveShadows = 0f, blueCurveMidtones = 0f, blueCurveHighlights = 0f,
+                        lutIntensity = 1f
+                    )
+                }
             }) { Text("Reset") }
+        }
+        Tool.Mask -> {
+            if (c.isImage) {
+                Text("Clip masks currently support video clips. Photo mask preview/export will follow with the same rendering path.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+            } else {
+                Text("Shape mask · outside the selected shape is removed from the clip alpha. Preview and export share the same GPU effect.", style = MaterialTheme.typography.bodySmall, color = Pal.textLo)
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ClipMaskShape.values().forEach { shape ->
+                        FilterChip(selected = c.maskShape == shape, onClick = { vm.update(id) { it.copy(maskShape = shape) } },
+                            label = { Text(when (shape) { ClipMaskShape.None -> "Off"; ClipMaskShape.Rectangle -> "Rectangle"; ClipMaskShape.Ellipse -> "Ellipse" }) })
+                    }
+                }
+                if (c.maskShape != ClipMaskShape.None) {
+                    Slide("Mask center X", c.maskCenterX, 0f..1f, "${(c.maskCenterX * 100).toInt()}%") { v -> vm.update(id) { it.copy(maskCenterX = v) } }
+                    Slide("Mask center Y", c.maskCenterY, 0f..1f, "${(c.maskCenterY * 100).toInt()}%") { v -> vm.update(id) { it.copy(maskCenterY = v) } }
+                    Slide("Mask width", c.maskWidth, 0.05f..1.5f, "${(c.maskWidth * 100).toInt()}%") { v -> vm.update(id) { it.copy(maskWidth = v) } }
+                    Slide("Mask height", c.maskHeight, 0.05f..1.5f, "${(c.maskHeight * 100).toInt()}%") { v -> vm.update(id) { it.copy(maskHeight = v) } }
+                    Slide("Feather", c.maskFeather, 0f..0.25f, "${(c.maskFeather * 100).toInt()}%") { v -> vm.update(id) { it.copy(maskFeather = v) } }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Invert mask", Modifier.weight(1f))
+                        Switch(checked = c.maskInvert, onCheckedChange = { value -> vm.update(id) { it.copy(maskInvert = value) } })
+                    }
+                }
+                TextButton(onClick = { vm.update(id) { it.copy(maskShape = ClipMaskShape.None, maskCenterX = 0.5f, maskCenterY = 0.5f, maskWidth = 0.8f, maskHeight = 0.8f, maskFeather = 0.02f, maskInvert = false) } }) { Text("Reset mask") }
+            }
         }
         Tool.Crop -> {
             Slide("Crop left", c.cropL, 0f..0.45f, "${(c.cropL * 100).toInt()}%") { v -> vm.update(id) { it.copy(cropL = v) } }
@@ -2080,6 +2216,10 @@ private fun imageFilter(c: Clip): ColorFilter {
     if (c.saturation != 0f) apply(saturation(1f + c.saturation))
     if (c.hue != 0f) apply(hue(c.hue * 180f))
     if (c.warmth != 0f) apply(scale(1f + 0.3f * c.warmth, 1f, 1f - 0.3f * c.warmth))
+    if (c.tint != 0f) apply(scale(1f + 0.12f * c.tint, 1f - 0.12f * c.tint, 1f + 0.12f * c.tint))
+    if (c.redGain != 1f || c.greenGain != 1f || c.blueGain != 1f) {
+        apply(scale(c.redGain, c.greenGain, c.blueGain))
+    }
     when (c.filter) {
         Filter.None -> {}
         Filter.Gray -> apply(saturation(0f))
